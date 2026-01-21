@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  fan-control-backend:
+    build: ./backend
+    container_name: fan-control-backend
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/ipmi0:/dev/ipmi0
+    volumes:
+      - ./data:/app/data
+      - /sys:/sys:ro
+    environment:
+      - TZ=${TZ:-UTC}
+      - SERVER_PORT=8080
+      - DATA_PATH=/app/data
+      - IPMI_MODE=${IPMI_MODE:-local}
+      - IPMI_HOST=${IPMI_HOST:-}
+      - IPMI_USER=${IPMI_USER:-}
+      - IPMI_PASS=${IPMI_PASS:-}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_JWT_SECRET=${AUTH_JWT_SECRET:-change-me-in-production}
+      - AUTH_TOKEN_TTL=${AUTH_TOKEN_TTL:-24h}
+      - AUTH_PROXY_ENABLED=${AUTH_PROXY_ENABLED:-false}
+      - AUTH_PROXY_HEADER=${AUTH_PROXY_HEADER:-X-Forwarded-User}
+      - AUTH_DEFAULT_ADMIN=${AUTH_DEFAULT_ADMIN:-admin}
+      - AUTH_DEFAULT_PASSWORD=${AUTH_DEFAULT_PASSWORD:-admin}
+      - CONTROL_INTERVAL=${CONTROL_INTERVAL:-5s}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  fan-control-frontend:
+    build: ./frontend
+    container_name: fan-control-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - fan-control-backend
+    environment:
+      - TZ=${TZ:-UTC}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  data:
