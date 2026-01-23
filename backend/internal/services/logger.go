@@ -117,10 +117,13 @@ func (l *EventLogger) Query(ctx context.Context, q *models.EventQuery) (*models.
 	}, nil
 }
 
+// MaxExportRows is the maximum number of rows that can be exported at once
+const MaxExportRows = 10000
+
 // ExportCSV exports events to CSV format
 func (l *EventLogger) ExportCSV(ctx context.Context, q *models.EventQuery, w io.Writer) error {
-	// Remove pagination for export
-	q.Limit = 0
+	// Limit export to prevent memory exhaustion
+	q.Limit = MaxExportRows
 	q.Offset = 0
 
 	query := database.DB.Model(&models.Event{})
@@ -179,8 +182,8 @@ func (l *EventLogger) ExportCSV(ctx context.Context, q *models.EventQuery, w io.
 
 // ExportJSON exports events to JSON format
 func (l *EventLogger) ExportJSON(ctx context.Context, q *models.EventQuery, w io.Writer) error {
-	// Remove pagination for export
-	q.Limit = 0
+	// Limit export to prevent memory exhaustion
+	q.Limit = MaxExportRows
 	q.Offset = 0
 
 	query := database.DB.Model(&models.Event{})

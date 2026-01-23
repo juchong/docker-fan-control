@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"docker-fan-control/internal/config"
@@ -41,14 +43,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.LogAuthEvent("login", req.Username, true, nil)
 
-	// Set cookie
+	// Set cookie with strict security settings
 	http.SetCookie(w, &http.Cookie{
 		Name:     "auth_token",
 		Value:    resp.Token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	writeJSON(w, resp)
@@ -87,14 +89,14 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set cookie
+	// Set cookie with strict security settings
 	http.SetCookie(w, &http.Cookie{
 		Name:     "auth_token",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	writeJSON(w, map[string]string{"token": token})
@@ -122,6 +124,12 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req models.ChangePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate new password complexity
+	if err := validatePasswordComplexity(req.NewPassword); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -165,8 +173,24 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sanitize input
+	req.Username = SanitizeInput(req.Username)
+	// Don't sanitize password as it may contain special characters needed for complexity
+
 	if req.Username == "" || req.Password == "" {
 		http.Error(w, "Username and password are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate username format (alphanumeric, underscore, hyphen, 3-32 chars)
+	if err := validateUsername(req.Username); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate password complexity
+	if err := validatePasswordComplexity(req.Password); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -206,6 +230,20 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	var req models.UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate password complexity if password is being updated
+	if req.Password != nil && *req.Password != "" {
+		if err := validatePasswordComplexity(*req.Password); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Validate role if provided
+	if req.Role != nil && *req.Role != "admin" && *req.Role != "user" {
+		http.Error(w, "Invalid role. Must be 'admin' or 'user'", http.StatusBadRequest)
 		return
 	}
 
@@ -264,6 +302,50 @@ func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// validateUsername validates username format
+func validateUsername(username string) error {
+	if len(username) < 3 {
+		return fmt.Errorf("username must be at least 3 characters")
+	}
+	if len(username) > 32 {
+		return fmt.Errorf("username must be at most 32 characters")
+	}
+	// Only allow alphanumeric, underscore, and hyphen
+	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(username) {
+		return fmt.Errorf("username can only contain letters, numbers, underscores, and hyphens")
+	}
+	return nil
+}
+
+// validatePasswordComplexity validates password complexity
+func validatePasswordComplexity(password string) error {
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+	
+	// Check for at least one uppercase letter
+	if !regexp.MustCompile(`[A-Z]`).MatchString(password) {
+		return fmt.Errorf("password must contain at least one uppercase letter")
+	}
+	
+	// Check for at least one lowercase letter
+	if !regexp.MustCompile(`[a-z]`).MatchString(password) {
+		return fmt.Errorf("password must contain at least one lowercase letter")
+	}
+	
+	// Check for at least one digit
+	if !regexp.MustCompile(`[0-9]`).MatchString(password) {
+		return fmt.Errorf("password must contain at least one number")
+	}
+	
+	// Check for at least one special character
+	if !regexp.MustCompile(`[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?~]`).MatchString(password) {
+		return fmt.Errorf("password must contain at least one special character")
+	}
+	
+	return nil
 }
 
 // writeJSON writes JSON response

@@ -62,7 +62,7 @@ func (h *FansHandler) Detect(w http.ResponseWriter, r *http.Request) {
 	detected, err := h.ipmi.DetectFans(r.Context())
 	if err != nil {
 		h.logger.LogIPMIError("fan detection", err)
-		http.Error(w, "Failed to detect fans: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to detect fans", http.StatusInternalServerError)
 		return
 	}
 
@@ -95,6 +95,16 @@ func (h *FansHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	// Sanitize and validate label
+	if req.Label != nil {
+		sanitized := SanitizeInput(*req.Label)
+		if len(sanitized) > 64 {
+			http.Error(w, "Label must be at most 64 characters", http.StatusBadRequest)
+			return
+		}
+		req.Label = &sanitized
 	}
 
 	updateReq := &models.UpdateFanRequest{Label: req.Label}
@@ -197,6 +207,7 @@ func (h *FansHandler) SetSpeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate percentage range
 	if req.Percent < 0 || req.Percent > 100 {
 		http.Error(w, "Percent must be between 0 and 100", http.StatusBadRequest)
 		return

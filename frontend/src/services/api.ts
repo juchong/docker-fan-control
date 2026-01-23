@@ -1,7 +1,7 @@
 import type { AppSettings, DriverInfo, MotherboardDetectionResult } from '../types/settings';
 import type { ZoneLayout } from '../types/zone';
 
-const API_BASE = '/api';
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {

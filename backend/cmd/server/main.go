@@ -81,8 +81,10 @@ func main() {
 	log.Info().Int("gpu_count", gpuSvc.GetDeviceCount()).Msg("GPU monitoring initialized")
 
 	// Ensure default admin user
-	if err := authSvc.EnsureDefaultAdmin(cfg.Auth.DefaultAdmin, cfg.Auth.DefaultPassword); err != nil {
+	if err := authSvc.EnsureDefaultAdmin(cfg.Auth.DefaultAdmin, cfg.Auth.DefaultPassword, cfg.Auth.ResetAdminPassword); err != nil {
 		log.Warn().Err(err).Msg("Failed to create default admin user")
+	} else if cfg.Auth.ResetAdminPassword {
+		log.Info().Str("username", cfg.Auth.DefaultAdmin).Msg("Admin password reset from AUTH_DEFAULT_PASSWORD")
 	}
 
 	// Create services container

@@ -19,28 +19,58 @@ func NewLogsHandler(logger *services.EventLogger) *LogsHandler {
 	return &LogsHandler{logger: logger}
 }
 
+// Allowed log levels and categories for validation
+var (
+	allowedLevels     = map[string]bool{"info": true, "warn": true, "error": true, "debug": true}
+	allowedCategories = map[string]bool{
+		string(models.CategoryFan): true, string(models.CategoryProfile): true,
+		string(models.CategorySystem): true, string(models.CategoryIPMI): true,
+		string(models.CategoryAuth): true, string(models.CategoryTemp): true,
+	}
+)
+
+// MaxLogLimit is the maximum number of log entries that can be retrieved
+const MaxLogLimit = 1000
+
 // List handles GET /api/logs
 func (h *LogsHandler) List(w http.ResponseWriter, r *http.Request) {
 	query := &models.EventQuery{}
 
-	// Parse query parameters
+	// Parse and validate query parameters
 	if level := r.URL.Query().Get("level"); level != "" {
+		if !allowedLevels[level] {
+			http.Error(w, "Invalid log level", http.StatusBadRequest)
+			return
+		}
 		query.Level = level
 	}
 	if category := r.URL.Query().Get("category"); category != "" {
+		if !allowedCategories[category] {
+			http.Error(w, "Invalid category", http.StatusBadRequest)
+			return
+		}
 		query.Category = category
 	}
 	if search := r.URL.Query().Get("search"); search != "" {
-		query.Search = search
+		// Sanitize search input - limit length and remove dangerous characters
+		sanitized := SanitizeInput(search)
+		if len(sanitized) > 100 {
+			sanitized = sanitized[:100]
+		}
+		query.Search = sanitized
 	}
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil {
-			query.Limit = limit
+			if limit > 0 && limit <= MaxLogLimit {
+				query.Limit = limit
+			}
 		}
 	}
 	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
 		if offset, err := strconv.Atoi(offsetStr); err == nil {
-			query.Offset = offset
+			if offset >= 0 {
+				query.Offset = offset
+			}
 		}
 	}
 	if startStr := r.URL.Query().Get("start_time"); startStr != "" {
@@ -72,15 +102,27 @@ func (h *LogsHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *LogsHandler) Export(w http.ResponseWriter, r *http.Request) {
 	query := &models.EventQuery{}
 
-	// Parse query parameters
+	// Parse and validate query parameters
 	if level := r.URL.Query().Get("level"); level != "" {
+		if !allowedLevels[level] {
+			http.Error(w, "Invalid log level", http.StatusBadRequest)
+			return
+		}
 		query.Level = level
 	}
 	if category := r.URL.Query().Get("category"); category != "" {
+		if !allowedCategories[category] {
+			http.Error(w, "Invalid category", http.StatusBadRequest)
+			return
+		}
 		query.Category = category
 	}
 	if search := r.URL.Query().Get("search"); search != "" {
-		query.Search = search
+		sanitized := SanitizeInput(search)
+		if len(sanitized) > 100 {
+			sanitized = sanitized[:100]
+		}
+		query.Search = sanitized
 	}
 	if startStr := r.URL.Query().Get("start_time"); startStr != "" {
 		if start, err := time.Parse(time.RFC3339, startStr); err == nil {

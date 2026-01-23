@@ -52,7 +52,8 @@ Access the web interface at `http://localhost:3000` (login: `admin` / your passw
 | `IPMI_USER` | - | BMC username (LAN mode only) |
 | `IPMI_PASS` | - | BMC password (LAN mode only) |
 | `AUTH_JWT_SECRET` | - | JWT signing secret (**required**) |
-| `AUTH_DEFAULT_PASSWORD` | `admin` | Initial admin password |
+| `AUTH_DEFAULT_PASSWORD` | `admin` | Initial admin password (only used on first run) |
+| `AUTH_RESET_ADMIN_PASSWORD` | `false` | Set to `true` to reset admin password on startup |
 | `CONTROL_INTERVAL` | `5s` | Fan control loop interval |
 
 ### Docker Compose

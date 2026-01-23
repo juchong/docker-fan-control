@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"time"
 
@@ -24,8 +26,9 @@ var (
 
 // AuthService handles authentication
 type AuthService struct {
-	jwtSecret []byte
-	tokenTTL  time.Duration
+	jwtSecret      []byte
+	tokenTTL       time.Duration
+	sessionTimeout time.Duration
 }
 
 // JWTClaims represents JWT claims
@@ -39,22 +42,37 @@ type JWTClaims struct {
 // NewAuthService creates a new auth service
 func NewAuthService(cfg *config.AuthConfig) *AuthService {
 	return &AuthService{
-		jwtSecret: cfg.JWTSecret,
-		tokenTTL:  cfg.TokenTTL,
+		jwtSecret:      cfg.JWTSecret,
+		tokenTTL:       cfg.TokenTTL,
+		sessionTimeout: cfg.SessionTimeout,
 	}
 }
+
+// dummyHash is a bcrypt hash used to prevent timing attacks on user enumeration
+// This ensures login takes similar time whether the user exists or not
+var dummyHash = []byte("$2a$10$dummyhashtopreventtimingattacksonuserenumeration")
 
 // Login validates credentials and returns a JWT token
 func (s *AuthService) Login(ctx context.Context, username, password string) (*models.LoginResponse, error) {
 	var user models.User
+	userNotFound := false
+
 	if err := database.DB.Where("username = ?", username).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrInvalidCredentials
+			userNotFound = true
+			// Don't return yet - perform dummy bcrypt comparison to prevent timing attacks
+		} else {
+			return nil, err
 		}
-		return nil, err
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+	// Always perform bcrypt comparison to prevent timing-based user enumeration
+	hashToCompare := []byte(user.PasswordHash)
+	if userNotFound {
+		hashToCompare = dummyHash
+	}
+
+	if err := bcrypt.CompareHashAndPassword(hashToCompare, []byte(password)); err != nil || userNotFound {
 		return nil, ErrInvalidCredentials
 	}
 
@@ -76,6 +94,10 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*mo
 // ValidateToken verifies a JWT token and returns the user
 func (s *AuthService) ValidateToken(tokenStr string) (*models.User, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JWTClaims{}, func(token *jwt.Token) (any, error) {
+		// Validate signing algorithm to prevent algorithm confusion attacks
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, ErrInvalidToken
+		}
 		return s.jwtSecret, nil
 	})
 
@@ -140,9 +162,17 @@ func (s *AuthService) GetOrCreateProxyUser(ctx context.Context, username string)
 		return nil, err
 	}
 
-	// Create new user with random password (they authenticate via proxy)
-	randomPass := time.Now().UnixNano()
-	hash, _ := bcrypt.GenerateFromPassword([]byte(string(rune(randomPass))), bcrypt.DefaultCost)
+	// Create new user with cryptographically secure random password
+	// (they authenticate via proxy, so this password is never used)
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return nil, err
+	}
+	randomPass := base64.StdEncoding.EncodeToString(randomBytes)
+	hash, err := bcrypt.GenerateFromPassword([]byte(randomPass), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
 
 	user = models.User{
 		Username:     username,
@@ -230,20 +260,43 @@ func (s *AuthService) GetUserByID(ctx context.Context, userID uint) (*models.Use
 	return &user, nil
 }
 
-// EnsureDefaultAdmin creates the default admin user if no users exist
-func (s *AuthService) EnsureDefaultAdmin(username, password string) error {
+// GetJWTSecret returns the JWT secret
+func (s *AuthService) GetJWTSecret() []byte {
+	return s.jwtSecret
+}
+
+// EnsureDefaultAdmin creates the default admin user if no users exist,
+// or resets the admin password if resetPassword is true
+func (s *AuthService) EnsureDefaultAdmin(username, password string, resetPassword bool) error {
 	var count int64
 	database.DB.Model(&models.User{}).Count(&count)
-	if count > 0 {
-		return nil
+	
+	if count == 0 {
+		// No users exist, create the default admin
+		if password == "" {
+			password = "admin" // Default password, should be changed
+		}
+		_, err := s.CreateUser(context.Background(), username, password, "admin")
+		return err
 	}
 
-	if password == "" {
-		password = "admin" // Default password, should be changed
+	// Users exist - check if we should reset the admin password
+	if resetPassword && password != "" {
+		var user models.User
+		if err := database.DB.Where("username = ?", username).First(&user).Error; err != nil {
+			// Default admin user doesn't exist, nothing to update
+			return nil
+		}
+
+		// Update the password
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		return database.DB.Model(&user).Update("password_hash", string(hash)).Error
 	}
 
-	_, err := s.CreateUser(context.Background(), username, password, "admin")
-	return err
+	return nil
 }
 
 // generateToken generates a JWT token for a user

@@ -11,6 +11,19 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// sanitizeProfileRequest sanitizes profile request
+func sanitizeProfileRequest(req models.CreateProfileRequest) models.CreateProfileRequest {
+	req.Name = SanitizeInput(req.Name)
+	req.Description = SanitizeInput(req.Description)
+	
+	// Sanitize inputs
+	for i := range req.Inputs {
+		req.Inputs[i].InputType = SanitizeInput(req.Inputs[i].InputType)
+	}
+	
+	return req
+}
+
 // ProfilesHandler handles profile endpoints
 type ProfilesHandler struct {
 	profiles   *services.ProfileService
@@ -64,13 +77,35 @@ func (h *ProfilesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sanitize input
+	req = sanitizeProfileRequest(req)
+
 	if req.Name == "" {
 		http.Error(w, "Name is required", http.StatusBadRequest)
 		return
 	}
 
+	// Validate name length
+	if len(req.Name) > 64 {
+		http.Error(w, "Name must be at most 64 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Validate description length
+	if len(req.Description) > 256 {
+		http.Error(w, "Description must be at most 256 characters", http.StatusBadRequest)
+		return
+	}
+
 	if req.Algorithm == "" {
 		req.Algorithm = "linear"
+	}
+
+	// Validate algorithm
+	validAlgorithms := map[string]bool{"linear": true, "step": true, "pid": true}
+	if !validAlgorithms[req.Algorithm] {
+		http.Error(w, "Algorithm must be 'linear', 'step', or 'pid'", http.StatusBadRequest)
+		return
 	}
 
 	if req.AlgorithmParams == nil {
@@ -133,6 +168,35 @@ func (h *ProfilesHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	// Sanitize and validate input
+	if req.Name != nil {
+		sanitized := SanitizeInput(*req.Name)
+		if sanitized == "" {
+			http.Error(w, "Name cannot be empty", http.StatusBadRequest)
+			return
+		}
+		if len(sanitized) > 64 {
+			http.Error(w, "Name must be at most 64 characters", http.StatusBadRequest)
+			return
+		}
+		req.Name = &sanitized
+	}
+	if req.Description != nil {
+		sanitized := SanitizeInput(*req.Description)
+		if len(sanitized) > 256 {
+			http.Error(w, "Description must be at most 256 characters", http.StatusBadRequest)
+			return
+		}
+		req.Description = &sanitized
+	}
+	if req.Algorithm != nil {
+		validAlgorithms := map[string]bool{"linear": true, "step": true, "pid": true}
+		if !validAlgorithms[*req.Algorithm] {
+			http.Error(w, "Algorithm must be 'linear', 'step', or 'pid'", http.StatusBadRequest)
+			return
+		}
 	}
 
 	profile, err := h.profiles.Update(r.Context(), uint(id), &req)

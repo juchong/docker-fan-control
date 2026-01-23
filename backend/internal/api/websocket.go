@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +20,33 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins
+		// Validate origin to prevent cross-site WebSocket hijacking
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// Allow requests without Origin header (non-browser clients)
+			return true
+		}
+		
+		// Allow same-origin requests
+		host := r.Host
+		if host == "" {
+			host = r.Header.Get("Host")
+		}
+		
+		// Check if origin matches host (same-origin)
+		// Origin format: scheme://host[:port]
+		// We compare the host portion
+		if strings.Contains(origin, "://"+host) {
+			return true
+		}
+		
+		// Allow localhost for development
+		if strings.Contains(origin, "://localhost") || strings.Contains(origin, "://127.0.0.1") {
+			return true
+		}
+		
+		log.Warn().Str("origin", origin).Str("host", host).Msg("WebSocket origin validation failed")
+		return false
 	},
 }
 

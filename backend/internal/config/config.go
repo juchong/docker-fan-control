@@ -19,6 +19,7 @@ type ServerConfig struct {
 	Port         int
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+	APIBasePath  string
 }
 
 // IPMIConfig holds IPMI connection settings
@@ -31,14 +32,16 @@ type IPMIConfig struct {
 
 // AuthConfig holds authentication settings
 type AuthConfig struct {
-	Enabled          bool
-	JWTSecret        []byte
-	TokenTTL         time.Duration
-	ProxyAuthEnabled bool
-	ProxyAuthHeader  string
-	ProxyAutoCreate  bool
-	DefaultAdmin     string
-	DefaultPassword  string
+	Enabled            bool
+	JWTSecret          []byte
+	TokenTTL           time.Duration
+	SessionTimeout     time.Duration
+	ProxyAuthEnabled   bool
+	ProxyAuthHeader    string
+	ProxyAutoCreate    bool
+	DefaultAdmin       string
+	DefaultPassword    string
+	ResetAdminPassword bool
 }
 
 // DataConfig holds data storage settings
@@ -55,6 +58,7 @@ func Load() *Config {
 			Port:         getEnvInt("SERVER_PORT", 8080),
 			ReadTimeout:  getEnvDuration("SERVER_READ_TIMEOUT", 30*time.Second),
 			WriteTimeout: getEnvDuration("SERVER_WRITE_TIMEOUT", 30*time.Second),
+			APIBasePath:  getEnv("API_BASE_PATH", "/api"),
 		},
 		IPMI: IPMIConfig{
 			Mode:     getEnv("IPMI_MODE", "local"),
@@ -63,14 +67,16 @@ func Load() *Config {
 			Password: getEnv("IPMI_PASS", ""),
 		},
 		Auth: AuthConfig{
-			Enabled:          getEnvBool("AUTH_ENABLED", true),
-			JWTSecret:        []byte(getEnv("AUTH_JWT_SECRET", "change-me-in-production")),
-			TokenTTL:         getEnvDuration("AUTH_TOKEN_TTL", 24*time.Hour),
-			ProxyAuthEnabled: getEnvBool("AUTH_PROXY_ENABLED", false),
-			ProxyAuthHeader:  getEnv("AUTH_PROXY_HEADER", "X-Forwarded-User"),
-			ProxyAutoCreate:  getEnvBool("AUTH_PROXY_AUTO_CREATE", true),
-			DefaultAdmin:     getEnv("AUTH_DEFAULT_ADMIN", "admin"),
-			DefaultPassword:  getEnv("AUTH_DEFAULT_PASSWORD", ""),
+			Enabled:            getEnvBool("AUTH_ENABLED", true),
+			JWTSecret:          []byte(getEnv("AUTH_JWT_SECRET", "change-me-in-production")),
+			TokenTTL:           getEnvDuration("AUTH_TOKEN_TTL", 24*time.Hour),
+			SessionTimeout:     getEnvDuration("AUTH_SESSION_TIMEOUT", 0), // 0 = disabled
+			ProxyAuthEnabled:   getEnvBool("AUTH_PROXY_ENABLED", false),
+			ProxyAuthHeader:    getEnv("AUTH_PROXY_HEADER", "X-Forwarded-User"),
+			ProxyAutoCreate:    getEnvBool("AUTH_PROXY_AUTO_CREATE", true),
+			DefaultAdmin:       getEnv("AUTH_DEFAULT_ADMIN", "admin"),
+			DefaultPassword:    getEnv("AUTH_DEFAULT_PASSWORD", ""),
+			ResetAdminPassword: getEnvBool("AUTH_RESET_ADMIN_PASSWORD", false),
 		},
 		Data: DataConfig{
 			Path:            getEnv("DATA_PATH", "/app/data"),

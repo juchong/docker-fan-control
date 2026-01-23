@@ -2,13 +2,45 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
+	"regexp"
 	"time"
 
 	"docker-fan-control/internal/database"
 	"docker-fan-control/internal/models"
 	"docker-fan-control/internal/services"
 )
+
+// ipmiHostRegex validates IPMI host (hostname or IP address)
+var ipmiHostRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.-]{0,253}[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
+
+// ipmiUserRegex validates IPMI username (alphanumeric, underscores, hyphens)
+var ipmiUserRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// sanitizeSettingsRequest sanitizes settings request
+func sanitizeSettingsRequest(req models.UpdateSettingsRequest) models.UpdateSettingsRequest {
+	if req.IPMIHost != nil {
+		*req.IPMIHost = SanitizeInput(*req.IPMIHost)
+	}
+	if req.IPMIUser != nil {
+		*req.IPMIUser = SanitizeInput(*req.IPMIUser)
+	}
+	if req.IPMIPass != nil {
+		*req.IPMIPass = SanitizeInput(*req.IPMIPass)
+	}
+	if req.MotherboardVendor != nil {
+		*req.MotherboardVendor = SanitizeInput(*req.MotherboardVendor)
+	}
+	if req.MotherboardModel != nil {
+		*req.MotherboardModel = SanitizeInput(*req.MotherboardModel)
+	}
+	if req.MotherboardDriver != nil {
+		*req.MotherboardDriver = SanitizeInput(*req.MotherboardDriver)
+	}
+	
+	return req
+}
 
 // SettingsHandler handles settings endpoints
 type SettingsHandler struct {
@@ -39,6 +71,81 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var req models.UpdateSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Sanitize input
+	req = sanitizeSettingsRequest(req)
+
+	// Validate enum values
+	if req.IPMIMode != nil && *req.IPMIMode != "local" && *req.IPMIMode != "lan" {
+		http.Error(w, "IPMI mode must be 'local' or 'lan'", http.StatusBadRequest)
+		return
+	}
+
+	// Validate IPMI host (must be valid hostname or IP)
+	if req.IPMIHost != nil && *req.IPMIHost != "" {
+		host := *req.IPMIHost
+		// Check if it's a valid IP address
+		if ip := net.ParseIP(host); ip == nil {
+			// Not an IP, validate as hostname
+			if !ipmiHostRegex.MatchString(host) || len(host) > 255 {
+				http.Error(w, "Invalid IPMI host format", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	// Validate IPMI username
+	if req.IPMIUser != nil && *req.IPMIUser != "" {
+		if !ipmiUserRegex.MatchString(*req.IPMIUser) {
+			http.Error(w, "IPMI username can only contain letters, numbers, underscores, and hyphens (max 64 chars)", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if req.TempUnit != nil && *req.TempUnit != "C" && *req.TempUnit != "F" {
+		http.Error(w, "Temperature unit must be 'C' or 'F'", http.StatusBadRequest)
+		return
+	}
+
+	if req.StartupMode != nil && *req.StartupMode != "resume" && *req.StartupMode != "full" && *req.StartupMode != "percent" {
+		http.Error(w, "Startup mode must be 'resume', 'full', or 'percent'", http.StatusBadRequest)
+		return
+	}
+
+	validFormats := map[string]bool{
+		models.IPMIFormatAuto: true, models.IPMIFormatAsrockROMED8: true,
+		models.IPMIFormatAsrockLegacy: true, models.IPMIFormatDell: true, models.IPMIFormatSupermicro: true,
+	}
+	if req.IPMICommandFormat != nil && !validFormats[*req.IPMICommandFormat] {
+		http.Error(w, "Invalid IPMI command format", http.StatusBadRequest)
+		return
+	}
+
+	// Validate numeric ranges
+	if req.ControlInterval != nil && (*req.ControlInterval < 1 || *req.ControlInterval > 60) {
+		http.Error(w, "Control interval must be between 1 and 60 seconds", http.StatusBadRequest)
+		return
+	}
+
+	if req.EmergencyTemp != nil && (*req.EmergencyTemp < 30 || *req.EmergencyTemp > 120) {
+		http.Error(w, "Emergency temperature must be between 30 and 120°C", http.StatusBadRequest)
+		return
+	}
+
+	if req.EmergencySpeed != nil && (*req.EmergencySpeed < 0 || *req.EmergencySpeed > 100) {
+		http.Error(w, "Emergency speed must be between 0 and 100%", http.StatusBadRequest)
+		return
+	}
+
+	if req.StartupPercent != nil && (*req.StartupPercent < 0 || *req.StartupPercent > 100) {
+		http.Error(w, "Startup percent must be between 0 and 100", http.StatusBadRequest)
+		return
+	}
+
+	if req.WarningTemp != nil && (*req.WarningTemp < 30 || *req.WarningTemp > 120) {
+		http.Error(w, "Warning temperature must be between 30 and 120°C", http.StatusBadRequest)
 		return
 	}
 
@@ -158,9 +265,10 @@ func (h *SettingsHandler) DetectMotherboard(w http.ResponseWriter, r *http.Reque
 	// Detect the best driver (drivers are registered at startup in main.go)
 	err := h.ipmi.DetectAndSetDriver(ctx)
 	if err != nil {
+		h.logger.Error(models.CategoryIPMI, "Motherboard detection failed", models.JSONMap{"error": err.Error()})
 		writeJSON(w, map[string]any{
 			"success": false,
-			"error":   err.Error(),
+			"error":   "Motherboard detection failed",
 		})
 		return
 	}
@@ -258,7 +366,7 @@ func (h *SettingsHandler) TestIPMI(w http.ResponseWriter, r *http.Request) {
 		h.logger.LogIPMIError("connection test", err)
 		writeJSON(w, map[string]any{
 			"success": false,
-			"error":   err.Error(),
+			"error":   "IPMI connection test failed",
 		})
 		return
 	}
@@ -284,7 +392,8 @@ func (h *SettingsHandler) StartController(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := h.controller.Start(r.Context()); err != nil {
-		http.Error(w, "Failed to start controller: "+err.Error(), http.StatusInternalServerError)
+		h.logger.Error(models.CategorySystem, "Failed to start controller", models.JSONMap{"error": err.Error()})
+		http.Error(w, "Failed to start controller", http.StatusInternalServerError)
 		return
 	}
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"docker-fan-control/internal/config"
 	"docker-fan-control/internal/services"
@@ -34,12 +35,42 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
 
-	// CORS
+	// Input validation
+	r.Use(ValidateRequest)
+
+	// Add auth service to context
+	r.Use(AddAuthServiceToContext(svc.Auth))
+
+	// Rate limiting
+	r.Use(RateLimiterMiddleware(svc.Auth))
+
+	// Session timeout
+	r.Use(SessionTimeoutMiddleware(svc.Auth, cfg.Auth.SessionTimeout))
+
+	// CORS - AllowOriginFunc validates origins dynamically
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowOriginFunc: func(r *http.Request, origin string) bool {
+			// Allow requests without Origin header (non-browser clients)
+			if origin == "" {
+				return true
+			}
+			// Allow same-origin requests
+			host := r.Host
+			if host == "" {
+				host = r.Header.Get("Host")
+			}
+			if strings.Contains(origin, "://"+host) {
+				return true
+			}
+			// Allow localhost for development
+			if strings.Contains(origin, "://localhost") || strings.Contains(origin, "://127.0.0.1") {
+				return true
+			}
+			return false
+		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Forwarded-User"},
-		ExposedHeaders:   []string{"Link"},
+		ExposedHeaders:   []string{"Link", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -53,7 +84,8 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 	settingsHandler := NewSettingsHandler(svc.IPMI, svc.Controller, svc.Auth, svc.Logger)
 	wsHandler := NewWebSocketHandler(svc.GPU, svc.System, svc.IPMI, svc.Controller, svc.Fans)
 
-	r.Route("/api", func(r chi.Router) {
+	apiBasePath := cfg.Server.APIBasePath
+	r.Route(apiBasePath, func(r chi.Router) {
 		// Public routes (no auth required)
 		r.Post("/auth/login", authHandler.Login)
 		r.Get("/auth/status", authHandler.Status)
@@ -119,10 +151,16 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 		})
 	})
 
-	// WebSocket for real-time updates
-	r.Get("/ws", wsHandler.Handle)
+	// WebSocket for real-time updates (requires authentication if enabled)
+	r.Group(func(r chi.Router) {
+		if cfg.Auth.Enabled {
+			r.Use(AuthMiddleware(svc.Auth, &cfg.Auth))
+		}
+		r.Get(apiBasePath+"/ws", wsHandler.Handle)
+	})
 
 	// Health check (supports both GET and HEAD for wget --spider)
+	// Available at both /health (for backwards compatibility) and /api/health
 	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
@@ -131,6 +169,8 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 	}
 	r.Get("/health", healthHandler)
 	r.Head("/health", healthHandler)
+	r.Get(apiBasePath+"/health", healthHandler)
+	r.Head(apiBasePath+"/health", healthHandler)
 
 	return r
 }
