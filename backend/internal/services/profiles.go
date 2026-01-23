@@ -17,18 +17,20 @@ var (
 
 // ProfileService handles profile management
 type ProfileService struct {
-	logger *EventLogger
+	logger          *EventLogger
+	validator       *ProfileValidator
 }
 
 // NewProfileService creates a new profile service
-func NewProfileService(logger *EventLogger) *ProfileService {
-	return &ProfileService{logger: logger}
+func NewProfileService(logger *EventLogger, driverRegistry *DriverRegistry) *ProfileService {
+	validator := NewProfileValidator(driverRegistry)
+	return &ProfileService{logger: logger, validator: validator}
 }
 
 // List returns all profiles
 func (s *ProfileService) List(ctx context.Context) ([]models.ProfileSummary, error) {
 	var profiles []models.Profile
-	if err := database.DB.Preload("Fans").Preload("Inputs").Find(&profiles).Error; err != nil {
+	if err := database.DB.Preload("Inputs").Find(&profiles).Error; err != nil {
 		return nil, err
 	}
 
@@ -42,7 +44,6 @@ func (s *ProfileService) List(ctx context.Context) ([]models.ProfileSummary, err
 			IsActive:    p.IsActive,
 			Zones:       p.Zones,
 			ZoneCount:   len(p.Zones),
-			FanCount:    len(p.Fans), // Deprecated
 			InputCount:  len(p.Inputs),
 		}
 	}
@@ -53,7 +54,7 @@ func (s *ProfileService) List(ctx context.Context) ([]models.ProfileSummary, err
 // Get returns a profile by ID
 func (s *ProfileService) Get(ctx context.Context, id uint) (*models.Profile, error) {
 	var profile models.Profile
-	if err := database.DB.Preload("Fans").Preload("Inputs").First(&profile, id).Error; err != nil {
+	if err := database.DB.Preload("Inputs").First(&profile, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrProfileNotFound
 		}
@@ -64,6 +65,11 @@ func (s *ProfileService) Get(ctx context.Context, id uint) (*models.Profile, err
 
 // Create creates a new profile
 func (s *ProfileService) Create(ctx context.Context, req *models.CreateProfileRequest) (*models.Profile, error) {
+	// Validate profile
+	if err := s.validator.ValidateProfileRequest(req); err != nil {
+		return nil, err
+	}
+
 	profile := &models.Profile{
 		Name:            req.Name,
 		Description:     req.Description,
@@ -79,19 +85,6 @@ func (s *ProfileService) Create(ctx context.Context, req *models.CreateProfileRe
 	if err := tx.Create(profile).Error; err != nil {
 		tx.Rollback()
 		return nil, err
-	}
-
-	// Associate fans (deprecated - for backward compatibility)
-	if len(req.FanIDs) > 0 {
-		var fans []models.Fan
-		if err := tx.Find(&fans, req.FanIDs).Error; err != nil {
-			tx.Rollback()
-			return nil, err
-		}
-		if err := tx.Model(profile).Association("Fans").Replace(fans); err != nil {
-			tx.Rollback()
-			return nil, err
-		}
 	}
 
 	// Create inputs
@@ -121,6 +114,11 @@ func (s *ProfileService) Update(ctx context.Context, id uint, req *models.Update
 		return nil, err
 	}
 
+	// Validate profile request
+	if err := s.validator.ValidateProfileUpdate(req); err != nil {
+		return nil, err
+	}
+
 	// Start transaction
 	tx := database.DB.Begin()
 
@@ -147,21 +145,6 @@ func (s *ProfileService) Update(ctx context.Context, id uint, req *models.Update
 	if err := tx.Save(&profile).Error; err != nil {
 		tx.Rollback()
 		return nil, err
-	}
-
-	// Update fans
-	if req.FanIDs != nil {
-		var fans []models.Fan
-		if len(*req.FanIDs) > 0 {
-			if err := tx.Find(&fans, *req.FanIDs).Error; err != nil {
-				tx.Rollback()
-				return nil, err
-			}
-		}
-		if err := tx.Model(&profile).Association("Fans").Replace(fans); err != nil {
-			tx.Rollback()
-			return nil, err
-		}
 	}
 
 	// Update inputs
@@ -206,11 +189,6 @@ func (s *ProfileService) Delete(ctx context.Context, id uint) error {
 		return err
 	}
 
-	// Delete fan associations
-	if err := database.DB.Model(&profile).Association("Fans").Clear(); err != nil {
-		return err
-	}
-
 	// Delete profile
 	return database.DB.Delete(&profile).Error
 }
@@ -246,7 +224,7 @@ func (s *FanService) Get(ctx context.Context, id uint) (*models.Fan, error) {
 	return &fan, nil
 }
 
-// Update updates a fan
+// Update updates a fan (only label can be changed - zones are defined in zone layout)
 func (s *FanService) Update(ctx context.Context, id uint, req *models.UpdateFanRequest) (*models.Fan, error) {
 	var fan models.Fan
 	if err := database.DB.First(&fan, id).Error; err != nil {
@@ -258,9 +236,6 @@ func (s *FanService) Update(ctx context.Context, id uint, req *models.UpdateFanR
 
 	if req.Label != nil {
 		fan.Label = *req.Label
-	}
-	if req.IPMIZone != nil {
-		fan.IPMIZone = req.IPMIZone
 	}
 
 	if err := database.DB.Save(&fan).Error; err != nil {
@@ -303,11 +278,3 @@ func (s *FanService) SaveDetectedFans(ctx context.Context, detected []models.Det
 	return savedFans, nil
 }
 
-// GetFanProfiles returns profile IDs that a fan is assigned to
-func (s *FanService) GetFanProfiles(ctx context.Context, fanID uint) ([]uint, error) {
-	var profileIDs []uint
-	err := database.DB.Table("profile_fans").
-		Where("fan_id = ?", fanID).
-		Pluck("profile_id", &profileIDs).Error
-	return profileIDs, err
-}

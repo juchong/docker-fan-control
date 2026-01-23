@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useMonitoring } from '../hooks/useMonitoring';
 import { Card } from '../components/common/Card';
-import { logsApi } from '../services/api';
+import { logsApi, settingsApi } from '../services/api';
+import { AppSettings } from '../types/settings';
 import { 
   Thermometer, 
   Cpu, 
@@ -13,7 +14,8 @@ import {
   Clock,
   HardDrive,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Layers
 } from 'lucide-react';
 
 function getTempColor(temp: number): string {
@@ -28,7 +30,7 @@ function formatBytes(bytes: number): string {
   return `${gb.toFixed(1)} GB`;
 }
 
-// Collapsible section component for handling many items
+// Collapsible section component
 function CollapsibleSection({ 
   title, 
   count, 
@@ -70,11 +72,7 @@ function CollapsibleSection({
             </span>
           )}
         </div>
-        {expanded ? (
-          <ChevronUp className="w-4 h-4 text-slate-400" />
-        ) : (
-          <ChevronDown className="w-4 h-4 text-slate-400" />
-        )}
+        {expanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
       </button>
       
       {expanded && (
@@ -96,6 +94,12 @@ function CollapsibleSection({
 
 export function Dashboard() {
   const { data: monitoring } = useMonitoring();
+  const isControllerRunning = monitoring?.controller?.running || false;
+
+  const { data: settings } = useQuery<AppSettings>({
+    queryKey: ['settings'],
+    queryFn: settingsApi.get,
+  });
 
   const { data: recentLogs } = useQuery({
     queryKey: ['recent-logs'],
@@ -103,25 +107,53 @@ export function Dashboard() {
     refetchInterval: 10000,
   });
 
+  const zoneLayout = settings?.zone_layout ?? null;
+
   // Calculate max temperatures
   const maxGpuTemp = Math.max(...(monitoring?.gpus?.map(g => g.temperature) || [0]));
   const maxCpuTemp = Math.max(...(monitoring?.system?.cpu_packages?.map(c => c.temperature) || [0]));
   const maxDriveTemp = Math.max(...(monitoring?.system?.drives?.map(d => d.temperature) || [0]));
 
+  // Group fans by zone
+  const getFanZone = (fan: { id: number; ipmi_sensor_id?: string; label?: string }) => {
+    if (!zoneLayout) return null;
+    const match = (fan as { ipmi_sensor_id?: string }).ipmi_sensor_id?.match(/FAN(\d+)/i);
+    if (!match) return null;
+    const fanIndex = parseInt(match[1]) - 1;
+    return zoneLayout.zones.find(z => z.fan_indices.includes(fanIndex));
+  };
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-slate-100">Dashboard</h1>
 
+      {/* Controller Status */}
+      <Card title="Controller Status">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-3 bg-slate-700/50 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              {isControllerRunning ? (
+                <CheckCircle className="w-5 h-5 text-green-400" />
+              ) : (
+                <AlertTriangle className="w-5 h-5 text-yellow-400" />
+              )}
+              <span className="font-medium text-slate-200">Status</span>
+            </div>
+            <div className={`text-lg font-bold ${isControllerRunning ? 'text-green-400' : 'text-red-400'}`}>
+              {isControllerRunning ? 'Running' : 'Stopped'}
+            </div>
+          </div>
+
+        </div>
+      </Card>
+
       {/* Quick Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {/* GPU Count */}
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-400">GPUs</p>
-              <p className="text-2xl font-bold text-slate-100">
-                {monitoring?.gpus?.length || 0}
-              </p>
+              <p className="text-2xl font-bold text-slate-100">{monitoring?.gpus?.length || 0}</p>
             </div>
             <div className="p-2 bg-purple-900/50 rounded-lg">
               <Activity className="w-5 h-5 text-purple-400" />
@@ -129,7 +161,6 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Max GPU Temp */}
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -144,7 +175,6 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* CPU Count & Max */}
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -159,7 +189,6 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Drive Count & Max */}
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -174,7 +203,6 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* CPU Load */}
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -189,14 +217,11 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Active Fans */}
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-400">Fans</p>
-              <p className="text-2xl font-bold text-slate-100">
-                {monitoring?.fans?.length || 0}
-              </p>
+              <p className="text-2xl font-bold text-slate-100">{monitoring?.fans?.length || 0}</p>
             </div>
             <div className="p-2 bg-green-900/50 rounded-lg">
               <Fan className="w-5 h-5 text-green-400" />
@@ -205,18 +230,11 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Temperature Sensors Grid */}
+      {/* Temperature Sensors */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* GPUs */}
         <Card title="GPUs">
           {monitoring?.gpus && monitoring.gpus.length > 0 ? (
-            <CollapsibleSection
-              title="Graphics Cards"
-              count={monitoring.gpus.length}
-              maxTemp={maxGpuTemp}
-              icon={Activity}
-              iconColor="text-purple-400"
-            >
+            <CollapsibleSection title="Graphics Cards" count={monitoring.gpus.length} maxTemp={maxGpuTemp} icon={Activity} iconColor="text-purple-400">
               {monitoring.gpus.map((gpu) => (
                 <div key={gpu.index} className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
                   <div>
@@ -224,11 +242,9 @@ export function Dashboard() {
                     <p className="text-sm text-slate-400">GPU {gpu.index}</p>
                   </div>
                   <div className="text-right">
-                    <p className={`text-xl font-bold ${getTempColor(gpu.temperature)}`}>
-                      {gpu.temperature}°C
-                    </p>
+                    <p className={`text-xl font-bold ${getTempColor(gpu.temperature)}`}>{gpu.temperature}°C</p>
                     <p className="text-sm text-slate-400">
-                      {gpu.load}% Load • {gpu.fan_speed}% Fan • {formatBytes(gpu.memory_used)} / {formatBytes(gpu.memory_total)}
+                      {gpu.load}% • {formatBytes(gpu.memory_used)} / {formatBytes(gpu.memory_total)}
                     </p>
                   </div>
                 </div>
@@ -239,27 +255,16 @@ export function Dashboard() {
           )}
         </Card>
 
-        {/* CPUs */}
         <Card title="CPUs">
           {monitoring?.system?.cpu_packages && monitoring.system.cpu_packages.length > 0 ? (
-            <CollapsibleSection
-              title="CPU Packages"
-              count={monitoring.system.cpu_packages.length}
-              maxTemp={maxCpuTemp}
-              icon={Cpu}
-              iconColor="text-blue-400"
-            >
+            <CollapsibleSection title="CPU Packages" count={monitoring.system.cpu_packages.length} maxTemp={maxCpuTemp} icon={Cpu} iconColor="text-blue-400">
               {monitoring.system.cpu_packages.map((cpu) => (
                 <div key={cpu.index} className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
                   <div>
                     <p className="font-medium text-slate-200">{cpu.name}</p>
                     <p className="text-sm text-slate-400">CPU {cpu.index}</p>
                   </div>
-                  <div className="text-right">
-                    <p className={`text-xl font-bold ${getTempColor(cpu.temperature)}`}>
-                      {cpu.temperature.toFixed(0)}°C
-                    </p>
-                  </div>
+                  <p className={`text-xl font-bold ${getTempColor(cpu.temperature)}`}>{cpu.temperature.toFixed(0)}°C</p>
                 </div>
               ))}
             </CollapsibleSection>
@@ -273,33 +278,19 @@ export function Dashboard() {
         {/* Drives */}
         <Card title="Drives">
           {monitoring?.system?.drives && monitoring.system.drives.length > 0 ? (
-            <CollapsibleSection
-              title="Storage Drives"
-              count={monitoring.system.drives.length}
-              maxTemp={maxDriveTemp}
-              icon={HardDrive}
-              iconColor="text-cyan-400"
-              defaultExpanded={true}
-            >
+            <CollapsibleSection title="Storage Drives" count={monitoring.system.drives.length} maxTemp={maxDriveTemp} icon={HardDrive} iconColor="text-cyan-400">
               {monitoring.system.drives.map((drive) => (
                 <div key={drive.index} className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
                   <div className="flex items-center gap-3">
                     <HardDrive className={`w-5 h-5 ${
-                      drive.type === 'nvme' ? 'text-purple-400' : 
-                      drive.type === 'ssd' ? 'text-blue-400' : 'text-slate-400'
+                      drive.type === 'nvme' ? 'text-purple-400' : drive.type === 'ssd' ? 'text-blue-400' : 'text-slate-400'
                     }`} />
                     <div>
                       <p className="font-medium text-slate-200">{drive.model || drive.device}</p>
-                      <p className="text-sm text-slate-400">
-                        {drive.device} • {drive.type.toUpperCase()}
-                      </p>
+                      <p className="text-sm text-slate-400">{drive.device} • {drive.type.toUpperCase()}</p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className={`text-xl font-bold ${getTempColor(drive.temperature)}`}>
-                      {drive.temperature}°C
-                    </p>
-                  </div>
+                  <p className={`text-xl font-bold ${getTempColor(drive.temperature)}`}>{drive.temperature}°C</p>
                 </div>
               ))}
             </CollapsibleSection>
@@ -308,35 +299,91 @@ export function Dashboard() {
           )}
         </Card>
 
-        {/* Fan Status */}
+        {/* Fan Status - Grouped by Zone */}
         <Card title="Fans">
           {monitoring?.fans && monitoring.fans.length > 0 ? (
-            <CollapsibleSection
-              title="System Fans"
-              count={monitoring.fans.length}
-              icon={Fan}
-              iconColor="text-green-400"
-            >
-              {monitoring.fans.map((fan) => (
-                <div key={fan.id} className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <Fan className={`w-5 h-5 ${fan.current_duty > 0 ? 'text-green-400 animate-spin' : 'text-slate-500'}`} 
-                      style={{ animationDuration: fan.current_duty > 50 ? '0.5s' : '1s' }} />
-                    <div>
-                      <p className="font-medium text-slate-200">{fan.label}</p>
-                      <p className="text-sm text-slate-400">
-                        {fan.ipmi_zone !== undefined ? `Zone ${fan.ipmi_zone}` : 'No zone'}
-                        {fan.manual_override && ' • Manual'}
-                      </p>
+            zoneLayout ? (
+              // Grouped by zone
+              <div className="space-y-4">
+                {zoneLayout.zones.map(zone => {
+                  const zoneFans = monitoring.fans.filter(f => {
+                    const fanZone = getFanZone(f);
+                    return fanZone?.id === zone.id;
+                  });
+                  
+                  if (zoneFans.length === 0) return null;
+                  
+                  return (
+                    <div key={zone.id} className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Layers className="w-4 h-4 text-slate-400" />
+                        <span className="font-medium text-slate-300">{zone.name}</span>
+                        <span className="text-slate-500">({zoneFans.length})</span>
+                      </div>
+                      {zoneFans.map((fan) => (
+                        <div key={fan.id} className="flex items-center justify-between p-2 bg-slate-700/50 rounded-lg ml-6">
+                          <div className="flex items-center gap-2">
+                            <Fan className={`w-4 h-4 ${fan.current_duty > 0 ? 'text-green-400' : 'text-slate-500'}`} />
+                            <span className="text-sm text-slate-200">{fan.label}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-sm font-bold text-slate-200">{fan.current_rpm} RPM</span>
+                            <span className="text-xs text-slate-400 ml-2">{fan.current_duty}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+                
+                {/* Unassigned fans */}
+                {(() => {
+                  const unassignedFans = monitoring.fans.filter(f => !getFanZone(f));
+                  if (unassignedFans.length === 0) return null;
+                  
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <AlertTriangle className="w-4 h-4 text-yellow-400" />
+                        <span className="font-medium text-slate-300">Unassigned</span>
+                        <span className="text-slate-500">({unassignedFans.length})</span>
+                      </div>
+                      {unassignedFans.map((fan) => (
+                        <div key={fan.id} className="flex items-center justify-between p-2 bg-slate-700/50 rounded-lg ml-6">
+                          <div className="flex items-center gap-2">
+                            <Fan className={`w-4 h-4 ${fan.current_duty > 0 ? 'text-green-400' : 'text-slate-500'}`} />
+                            <span className="text-sm text-slate-200">{fan.label}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-sm font-bold text-slate-200">{fan.current_rpm} RPM</span>
+                            <span className="text-xs text-slate-400 ml-2">{fan.current_duty}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              // Simple list without zones
+              <CollapsibleSection title="System Fans" count={monitoring.fans.length} icon={Fan} iconColor="text-green-400">
+                {monitoring.fans.map((fan) => (
+                  <div key={fan.id} className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <Fan className={`w-5 h-5 ${fan.current_duty > 0 ? 'text-green-400' : 'text-slate-500'}`} />
+                      <div>
+                        <p className="font-medium text-slate-200">{fan.label}</p>
+                        {fan.manual_override && <span className="text-xs text-yellow-400">Manual</span>}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xl font-bold text-slate-200">{fan.current_rpm} RPM</p>
+                      <p className="text-sm text-slate-400">{fan.current_duty}%</p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xl font-bold text-slate-200">{fan.current_rpm} RPM</p>
-                    <p className="text-sm text-slate-400">{fan.current_duty}% duty</p>
-                  </div>
-                </div>
-              ))}
-            </CollapsibleSection>
+                ))}
+              </CollapsibleSection>
+            )
           ) : (
             <p className="text-slate-400 text-center py-4">No fans detected</p>
           )}
@@ -354,20 +401,6 @@ export function Dashboard() {
                   <p className="font-medium text-slate-200">{profileName}</p>
                 </div>
               ))}
-              <p className="text-sm text-slate-400 mt-2">
-                Controller {monitoring.controller.running ? 'Running' : 'Stopped'}
-              </p>
-            </div>
-          ) : monitoring?.controller?.active_profile ? (
-            // Backward compatibility for single profile
-            <div className="flex items-center gap-3">
-              <CheckCircle className="w-5 h-5 text-green-400" />
-              <div>
-                <p className="font-medium text-slate-200">{monitoring.controller.active_profile}</p>
-                <p className="text-sm text-slate-400">
-                  Controller {monitoring.controller.running ? 'Running' : 'Stopped'}
-                </p>
-              </div>
             </div>
           ) : (
             <div className="flex items-center gap-3 text-slate-400">

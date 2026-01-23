@@ -56,8 +56,28 @@ const (
 	SettingWarningTemp       = "warning_temp"        // temperature for warning logs
 	SettingWarningEnabled    = "warning_enabled"     // whether to log warnings
 	SettingSafetyOnShutdown  = "safety_on_shutdown"  // set fans to 100% on shutdown
-	SettingActiveProfileID   = "active_profile_id"   // currently active profile
+	
+	// Motherboard settings
+	SettingMotherboardVendor = "motherboard_vendor" // Motherboard vendor (e.g., "ASRock Rack")
+	SettingMotherboardModel  = "motherboard_model"  // Motherboard model (e.g., "ROMED8-2T")
+	SettingMotherboardDriver = "motherboard_driver" // Manually selected driver
+	SettingZoneLayout        = "zone_layout"        // Custom zone layout (JSON)
 )
+
+// ZoneLayout represents a customizable zone layout
+type ZoneLayout struct {
+	Zones []ZoneDefinition `json:"zones"`
+}
+
+// ZoneDefinition represents a fan zone definition
+type ZoneDefinition struct {
+	ID          int      `json:"id"`
+	Name        string   `json:"name"`
+	FanIndices  []int    `json:"fan_indices"`
+	Description string   `json:"description,omitempty"`
+	IsDefault   bool     `json:"is_default"`
+	Color       string   `json:"color,omitempty"` // Optional color for UI
+}
 
 // IPMI command format values
 const (
@@ -83,6 +103,12 @@ type AppSettings struct {
 	WarningTemp       int    `json:"warning_temp"`
 	WarningEnabled    bool   `json:"warning_enabled"`
 	SafetyOnShutdown  bool   `json:"safety_on_shutdown"` // Set fans to 100% when stopping
+	
+	// Motherboard-specific settings
+	MotherboardVendor string      `json:"motherboard_vendor,omitempty"`
+	MotherboardModel  string      `json:"motherboard_model,omitempty"`
+	MotherboardDriver string      `json:"motherboard_driver,omitempty"`
+	ZoneLayout        *ZoneLayout `json:"zone_layout,omitempty"`
 }
 
 // UpdateSettingsRequest is the API request for updating settings
@@ -101,6 +127,12 @@ type UpdateSettingsRequest struct {
 	WarningTemp       *int    `json:"warning_temp,omitempty"`
 	WarningEnabled    *bool   `json:"warning_enabled,omitempty"`
 	SafetyOnShutdown  *bool   `json:"safety_on_shutdown,omitempty"`
+	
+	// Motherboard-specific settings
+	MotherboardVendor *string `json:"motherboard_vendor,omitempty"`
+	MotherboardModel  *string `json:"motherboard_model,omitempty"`
+	MotherboardDriver *string `json:"motherboard_driver,omitempty"`
+	ZoneLayout        *ZoneLayout `json:"zone_layout,omitempty"`
 }
 
 // Monitoring represents current system monitoring data
@@ -131,7 +163,6 @@ type SystemMetrics struct {
 	CPULoad     float64             `json:"cpu_load"`     // Percent
 	MemoryUsed  uint64              `json:"memory_used"`
 	MemoryTotal uint64              `json:"memory_total"`
-	// Legacy field for backward compatibility
 	CPUTemp *float64 `json:"cpu_temp,omitempty"` // Celsius (max of all packages)
 }
 
@@ -155,10 +186,28 @@ type DriveMetrics struct {
 // ControllerState represents the fan controller state
 type ControllerState struct {
 	Running          bool     `json:"running"`
-	ActiveProfileID  *uint    `json:"active_profile_id,omitempty"`  // Deprecated: use ActiveProfiles
-	ActiveProfile    string   `json:"active_profile,omitempty"`     // Deprecated: use ActiveProfiles
 	ActiveProfiles   []string `json:"active_profiles,omitempty"`    // Names of all active profiles
 	ActiveProfileIDs []uint   `json:"active_profile_ids,omitempty"` // IDs of all active profiles
 	LastUpdate       string   `json:"last_update,omitempty"`
 	ManualMode       bool     `json:"manual_mode"`
+	
+	// Motherboard information
+	MotherboardVendor string `json:"motherboard_vendor,omitempty"`
+	MotherboardModel  string `json:"motherboard_model,omitempty"`
+	MotherboardDriver string `json:"motherboard_driver,omitempty"`
+	
+	// Current driver information
+	DriverVendor       string            `json:"driver_vendor,omitempty"`
+	DriverModel        string            `json:"driver_model,omitempty"`
+	DriverCapabilities DriverCapabilities `json:"driver_capabilities,omitempty"`
+}
+
+// DriverCapabilities represents driver capabilities
+type DriverCapabilities struct {
+	SupportsManualMode       bool `json:"supports_manual_mode"`
+	SupportsDutyCycleReading bool `json:"supports_duty_cycle_reading"`
+	SupportsPerZoneControl   bool `json:"supports_per_zone_control"`
+	MaxZones                 int  `json:"max_zones"`
+	MaxFans                  int  `json:"max_fans"`
+	HasStaticRPMValues       bool `json:"has_static_rpm_values"`
 }

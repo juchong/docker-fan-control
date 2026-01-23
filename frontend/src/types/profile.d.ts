@@ -9,7 +9,6 @@ export interface Profile {
   zones?: number[];
   created_at: string;
   updated_at: string;
-  fans?: Fan[]; // Deprecated, use zones
   inputs?: ProfileInput[];
 }
 
@@ -21,7 +20,6 @@ export interface ProfileSummary {
   is_active: boolean;
   zones?: number[];
   zone_count: number;
-  fan_count: number; // Deprecated
   input_count: number;
 }
 
@@ -72,7 +70,6 @@ export interface CreateProfileRequest {
   algorithm_params?: AlgorithmParams;
   priority?: number;
   zones?: number[];
-  fan_ids?: number[]; // Deprecated, use zones
   inputs?: ProfileInput[];
 }
 
@@ -83,7 +80,6 @@ export interface UpdateProfileRequest {
   algorithm_params?: AlgorithmParams;
   priority?: number;
   zones?: number[];
-  fan_ids?: number[]; // Deprecated, use zones
   inputs?: ProfileInput[];
 }
 

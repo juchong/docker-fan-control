@@ -12,7 +12,9 @@ import (
 	"docker-fan-control/internal/api"
 	"docker-fan-control/internal/config"
 	"docker-fan-control/internal/database"
+	"docker-fan-control/internal/models"
 	"docker-fan-control/internal/services"
+	"docker-fan-control/internal/services/drivers"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -40,7 +42,7 @@ func main() {
 	ipmiSvc := services.NewIPMIService(cfg.IPMI.Mode, cfg.IPMI.Host, cfg.IPMI.User, cfg.IPMI.Password)
 	gpuSvc := services.NewGPUService()
 	systemSvc := services.NewSystemService()
-	profileSvc := services.NewProfileService(logger)
+	profileSvc := services.NewProfileService(logger, ipmiSvc.GetDriverRegistry())
 	fanSvc := services.NewFanService(logger)
 	controller := services.NewFanController(ipmiSvc, gpuSvc, systemSvc, logger)
 
@@ -51,6 +53,28 @@ func main() {
 			ipmiSvc.SetCommandFormat(format)
 		}
 	}
+
+	// Initialize driver system - register all available drivers
+	ipmiSvc.RegisterDriver(drivers.NewASRockDriver(ipmiSvc))
+	ipmiSvc.RegisterDriver(drivers.NewDellDriver(ipmiSvc))
+	ipmiSvc.RegisterDriver(drivers.NewSupermicroDriver(ipmiSvc))
+	ipmiSvc.RegisterDriver(drivers.NewGenericDriver(ipmiSvc))
+	
+	// Try to detect motherboard and set driver
+	detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := ipmiSvc.DetectAndSetDriver(detectCtx); err != nil {
+		log.Warn().Err(err).Msg("Failed to auto-detect motherboard driver")
+	} else {
+		driver := ipmiSvc.GetCurrentDriver()
+		if driver != nil {
+			log.Info().Str("vendor", driver.GetVendor()).Str("model", driver.GetModel()).Msg("Auto-detected motherboard")
+			// Cache the detected motherboard info to database
+			database.SetSetting(models.SettingMotherboardVendor, driver.GetVendor())
+			database.SetSetting(models.SettingMotherboardModel, driver.GetModel())
+			database.SetSetting(models.SettingMotherboardDriver, driver.GetVendor())
+		}
+	}
+	detectCancel()
 
 	// Log system info
 	systemSvc.LogSystemInfo()
@@ -85,10 +109,10 @@ func main() {
 	}
 
 	// Start fan controller
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	controllerCtx, controllerCancel := context.WithCancel(context.Background())
+	defer controllerCancel()
 
-	if err := controller.Start(ctx); err != nil {
+	if err := controller.Start(controllerCtx); err != nil {
 		log.Warn().Err(err).Msg("Failed to start fan controller")
 	}
 

@@ -15,9 +15,9 @@ export function Header() {
             <span className="text-sm text-slate-400">
               {data.controller.running ? 'Controller Running' : 'Controller Stopped'}
             </span>
-            {data.controller.active_profile && (
+            {data.controller.active_profiles && data.controller.active_profiles.length > 0 && (
               <span className="text-sm text-slate-300">
-                - {data.controller.active_profile}
+                - {data.controller.active_profiles.join(', ')}
               </span>
             )}
           </div>

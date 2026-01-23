@@ -1,4 +1,5 @@
-version: "3.8"
+# Docker Fan Control
+# See README.md for configuration details
 
 services:
   fan-control-backend:
@@ -27,6 +28,7 @@ services:
       - AUTH_DEFAULT_ADMIN=${AUTH_DEFAULT_ADMIN:-admin}
       - AUTH_DEFAULT_PASSWORD=${AUTH_DEFAULT_PASSWORD:-admin}
       - CONTROL_INTERVAL=${CONTROL_INTERVAL:-5s}
+    # GPU support (optional - remove this section if no NVIDIA GPUs)
     deploy:
       resources:
         reservations:
@@ -66,6 +68,3 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
-
-volumes:
-  data:

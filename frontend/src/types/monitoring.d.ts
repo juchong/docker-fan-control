@@ -1,4 +1,5 @@
 import { FanStatus } from './fan';
+import { ZoneLayout, ZoneDefinition } from './zone';
 
 export interface GPUMetrics {
   index: number;
@@ -33,19 +34,32 @@ export interface SystemMetrics {
   cpu_load: number;
   memory_used: number;
   memory_total: number;
-  // Legacy field for backward compatibility
   cpu_temp?: number;
+}
+
+export interface DriverCapabilities {
+  supports_manual_mode: boolean;
+  supports_duty_cycle_reading: boolean;
+  supports_per_zone_control: boolean;
+  max_zones: number;
+  max_fans: number;
+  has_static_rpm_values: boolean;
 }
 
 export interface ControllerState {
   running: boolean;
-  active_profile_id?: number;    // Deprecated, use active_profile_ids
-  active_profile?: string;       // Deprecated, use active_profiles
-  active_profiles?: string[];    // Names of all active profiles
-  active_profile_ids?: number[]; // IDs of all active profiles
+  active_profiles?: string[];
+  active_profile_ids?: number[];
   last_update?: string;
   manual_mode: boolean;
+  motherboard_vendor?: string;
+  motherboard_model?: string;
+  motherboard_driver?: string;
+  driver_vendor?: string;
+  driver_model?: string;
+  driver_capabilities?: DriverCapabilities;
 }
+
 
 export interface Monitoring {
   gpus: GPUMetrics[];
@@ -70,51 +84,11 @@ export interface EventListResponse {
   offset: number;
 }
 
-export interface EventQuery {
-  level?: string;
-  category?: string;
-  search?: string;
-  start_time?: string;
-  end_time?: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface AppSettings {
-  ipmi_mode: string;
-  ipmi_host?: string;
-  ipmi_user?: string;
-  ipmi_command_format: string;
-  control_interval: number;
-  temp_unit: string;
-  startup_mode: string;
-  startup_percent?: number;
-  emergency_temp: number;
-  emergency_speed: number;
-  warning_temp: number;
-  warning_enabled: boolean;
-  safety_on_shutdown: boolean;
-}
-
-export interface UpdateSettingsRequest {
-  ipmi_mode?: string;
-  ipmi_host?: string;
-  ipmi_user?: string;
-  ipmi_pass?: string;
-  ipmi_command_format?: string;
-  control_interval?: number;
-  temp_unit?: string;
-  startup_mode?: string;
-  startup_percent?: number;
-  emergency_temp?: number;
-  emergency_speed?: number;
-  warning_temp?: number;
-  warning_enabled?: boolean;
-  safety_on_shutdown?: boolean;
-}
-
 export interface WebSocketMessage {
   type: string;
   timestamp: string;
   data: unknown;
 }
+
+// Re-export zone types for convenience
+export { ZoneLayout, ZoneDefinition };

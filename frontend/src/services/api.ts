@@ -1,3 +1,6 @@
+import type { AppSettings, DriverInfo, MotherboardDetectionResult } from '../types/settings';
+import type { ZoneLayout } from '../types/zone';
+
 const API_BASE = '/api';
 
 class ApiError extends Error {
@@ -39,7 +42,7 @@ async function request<T>(
   return response.json();
 }
 
-// Auth
+// Auth API
 export const authApi = {
   login: (username: string, password: string) =>
     request<{ token: string; user: unknown }>('/auth/login', {
@@ -69,23 +72,17 @@ export const authApi = {
       body: JSON.stringify({ username, password, role }),
     }),
 
-  updateUser: (id: number, data: { password?: string; role?: string }) =>
-    request<unknown>(`/users/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
-
   deleteUser: (id: number) =>
     request<void>(`/users/${id}`, { method: 'DELETE' }),
 };
 
-// Fans
+// Fans API
 export const fansApi = {
   list: () => request<unknown[]>('/fans'),
 
   detect: () => request<unknown[]>('/fans/detect', { method: 'POST' }),
 
-  update: (id: number, data: { label?: string; ipmi_zone?: number }) =>
+  update: (id: number, data: { label?: string }) =>
     request<unknown>(`/fans/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -104,7 +101,7 @@ export const fansApi = {
     }),
 };
 
-// Profiles
+// Profiles API
 export const profilesApi = {
   list: () => request<unknown[]>('/profiles'),
 
@@ -135,18 +132,15 @@ export const profilesApi = {
     }),
 };
 
-// Monitoring
+// Monitoring API
 export const monitoringApi = {
   getMetrics: () => request<unknown>('/monitoring/metrics'),
-
   getGPUs: () => request<unknown[]>('/monitoring/gpus'),
-
   getSystem: () => request<unknown>('/monitoring/system'),
-
   getFans: () => request<unknown[]>('/monitoring/fans'),
 };
 
-// Logs
+// Logs API
 export const logsApi = {
   list: (params?: Record<string, string | number>) => {
     const query = params
@@ -165,21 +159,37 @@ export const logsApi = {
   clear: () => request<void>('/logs', { method: 'DELETE' }),
 };
 
-// Settings
+// Settings API
 export const settingsApi = {
-  get: () => request<unknown>('/settings'),
+  get: () => request<AppSettings>('/settings'),
 
-  update: (data: unknown) =>
-    request<unknown>('/settings', {
+  update: (data: { zone_layout?: ZoneLayout } & Record<string, unknown>) =>
+    request<AppSettings>('/settings', {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
 
-  testIPMI: () => request<{ success: boolean; error?: string; message?: string }>('/settings/test-ipmi', { method: 'POST' }),
+  testIPMI: () => 
+    request<{ success: boolean; error?: string; message?: string }>('/settings/test-ipmi', { 
+      method: 'POST' 
+    }),
 
-  startController: () => request<{ success: boolean; message: string }>('/controller/start', { method: 'POST' }),
+  detectMotherboard: () => 
+    request<MotherboardDetectionResult>('/settings/detect-motherboard', { 
+      method: 'POST' 
+    }),
 
-  stopController: () => request<{ success: boolean; message: string }>('/controller/stop', { method: 'POST' }),
+  getAvailableDrivers: () => request<DriverInfo[]>('/settings/drivers'),
+
+  startController: () => 
+    request<{ success: boolean; message: string }>('/controller/start', { 
+      method: 'POST' 
+    }),
+
+  stopController: () => 
+    request<{ success: boolean; message: string }>('/controller/stop', { 
+      method: 'POST' 
+    }),
 };
 
 export { ApiError };

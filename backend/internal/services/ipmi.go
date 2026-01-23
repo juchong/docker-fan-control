@@ -70,6 +70,19 @@ type IPMIService struct {
 	speedFormat  IPMICommandFormat // Cached working format for SetFanSpeed
 	modeFormat   IPMICommandFormat // Cached working format for SetManualMode
 	zoneSpeeds   [16]int           // Per-fan/zone speed tracking for ASRock ROMED8
+	driver       IPMIDriver        // Current active driver
+	driverRegistry *DriverRegistry // Registry of available drivers
+
+	// Caching for fan readings to reduce IPMI calls
+	cachedFanReadings    map[string]FanReading
+	cachedFanReadingsAt  time.Time
+	cachedFanSpeeds      map[string]int
+	cachedFanSpeedsAt    time.Time
+	cacheTTL             time.Duration
+
+	// Request coalescing - prevent duplicate concurrent IPMI calls
+	fanSpeedsInflight    bool
+	fanSpeedsWaiters     []chan struct{}
 }
 
 // NewIPMIService creates a new IPMI service
@@ -79,11 +92,16 @@ func NewIPMIService(mode, host, user, password string) *IPMIService {
 		host:     host,
 		user:     user,
 		password: password,
+		cacheTTL: 3 * time.Second, // Cache IPMI readings for 3 seconds
 	}
 	// Initialize zone speeds to 30% (minimum safe default)
 	for i := range svc.zoneSpeeds {
 		svc.zoneSpeeds[i] = 30
 	}
+	
+	// Create driver registry
+	svc.driverRegistry = NewDriverRegistry()
+	
 	return svc
 }
 
@@ -98,6 +116,53 @@ func (s *IPMIService) UpdateConfig(mode, host, user, password string) {
 	// Reset cached formats when config changes
 	s.speedFormat = FormatUnknown
 	s.modeFormat = FormatUnknown
+}
+
+// RegisterDriver registers a single driver with the IPMI service
+func (s *IPMIService) RegisterDriver(driver IPMIDriver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.driverRegistry.RegisterDriver(driver)
+}
+
+// DetectAndSetDriver attempts to detect the best driver for the current system
+func (s *IPMIService) DetectAndSetDriver(ctx context.Context) error {
+	// Don't hold lock during detection as it calls RunCommand which needs the lock
+	driver, err := s.driverRegistry.DetectBestDriver(ctx)
+	if err != nil {
+		return err
+	}
+	
+	if driver != nil {
+		s.mu.Lock()
+		s.driver = driver
+		s.mu.Unlock()
+		log.Info().Str("vendor", driver.GetVendor()).Str("model", driver.GetModel()).Msg("Detected and set IPMI driver")
+	}
+	
+	return nil
+}
+
+// GetCurrentDriver returns the currently active driver
+func (s *IPMIService) GetCurrentDriver() IPMIDriver {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.driver
+}
+
+// SetDriver manually sets a specific driver
+func (s *IPMIService) SetDriver(driver IPMIDriver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.driver = driver
+	log.Info().Str("vendor", driver.GetVendor()).Str("model", driver.GetModel()).Msg("Manually set IPMI driver")
+}
+
+// GetDriverRegistry returns the driver registry
+func (s *IPMIService) GetDriverRegistry() *DriverRegistry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.driverRegistry
 }
 
 // SetCommandFormat manually sets the IPMI command format
@@ -144,8 +209,23 @@ func (s *IPMIService) runCommand(ctx context.Context, args ...string) ([]byte, e
 	return cmd.CombinedOutput()
 }
 
+// RunCommand is a public version of runCommand that drivers can use
+func (s *IPMIService) RunCommand(ctx context.Context, args ...string) ([]byte, error) {
+	return s.runCommand(ctx, args...)
+}
+
 // DetectFans scans IPMI SDR for fan sensors
 func (s *IPMIService) DetectFans(ctx context.Context) ([]models.DetectedFan, error) {
+	// Use driver if available
+	s.mu.RLock()
+	driver := s.driver
+	s.mu.RUnlock()
+	
+	if driver != nil {
+		return driver.DetectFans(ctx)
+	}
+	
+	// Fallback to legacy implementation
 	output, err := s.runCommand(ctx, "sdr", "list", "full")
 	if err != nil {
 		return nil, fmt.Errorf("failed to run ipmitool: %w, output: %s", err, string(output))
@@ -187,35 +267,129 @@ func (s *IPMIService) parseFanSensors(output string) ([]models.DetectedFan, erro
 	return fans, nil
 }
 
-// GetFanSpeeds reads current RPM for all fans
+// GetFanSpeeds reads current RPM for all fans (with caching and request coalescing)
 func (s *IPMIService) GetFanSpeeds(ctx context.Context) (map[string]int, error) {
-	output, err := s.runCommand(ctx, "sdr", "list", "full")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get fan speeds: %w", err)
+	s.mu.Lock()
+	// Check cache first
+	if s.cachedFanSpeeds != nil && time.Since(s.cachedFanSpeedsAt) < s.cacheTTL {
+		result := make(map[string]int, len(s.cachedFanSpeeds))
+		for k, v := range s.cachedFanSpeeds {
+			result[k] = v
+		}
+		s.mu.Unlock()
+		return result, nil
 	}
 
-	fans, err := s.parseFanSensors(string(output))
+	// Check if a request is already in-flight
+	if s.fanSpeedsInflight {
+		// Wait for the in-flight request to complete
+		waiter := make(chan struct{})
+		s.fanSpeedsWaiters = append(s.fanSpeedsWaiters, waiter)
+		s.mu.Unlock()
+		
+		select {
+		case <-waiter:
+			// Request completed, return cached result
+			s.mu.RLock()
+			result := make(map[string]int, len(s.cachedFanSpeeds))
+			for k, v := range s.cachedFanSpeeds {
+				result[k] = v
+			}
+			s.mu.RUnlock()
+			return result, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	// We're the first request - mark as in-flight
+	s.fanSpeedsInflight = true
+	driver := s.driver
+	s.mu.Unlock()
+
+	var result map[string]int
+	var err error
+	
+	if driver != nil {
+		result, err = driver.GetFanSpeeds(ctx)
+	} else {
+		// Fallback to legacy implementation
+		var output []byte
+		output, err = s.runCommand(ctx, "sdr", "list", "full")
+		if err != nil {
+			s.mu.Lock()
+			s.fanSpeedsInflight = false
+			waiters := s.fanSpeedsWaiters
+			s.fanSpeedsWaiters = nil
+			s.mu.Unlock()
+			for _, w := range waiters {
+				close(w)
+			}
+			return nil, fmt.Errorf("failed to get fan speeds: %w", err)
+		}
+
+		var fans []models.DetectedFan
+		fans, err = s.parseFanSensors(string(output))
+		if err != nil {
+			s.mu.Lock()
+			s.fanSpeedsInflight = false
+			waiters := s.fanSpeedsWaiters
+			s.fanSpeedsWaiters = nil
+			s.mu.Unlock()
+			for _, w := range waiters {
+				close(w)
+			}
+			return nil, err
+		}
+
+		result = make(map[string]int)
+		for _, fan := range fans {
+			result[fan.SensorID] = fan.RPM
+		}
+	}
+
 	if err != nil {
+		s.mu.Lock()
+		s.fanSpeedsInflight = false
+		waiters := s.fanSpeedsWaiters
+		s.fanSpeedsWaiters = nil
+		s.mu.Unlock()
+		for _, w := range waiters {
+			close(w)
+		}
 		return nil, err
 	}
 
-	result := make(map[string]int)
-	for _, fan := range fans {
-		result[fan.SensorID] = fan.RPM
-		log.Debug().Str("sensor", fan.SensorID).Int("rpm", fan.RPM).Msg("Fan speed read")
-	}
+	// Update cache and notify waiters
+	s.mu.Lock()
+	s.cachedFanSpeeds = result
+	s.cachedFanSpeedsAt = time.Now()
+	s.fanSpeedsInflight = false
+	waiters := s.fanSpeedsWaiters
+	s.fanSpeedsWaiters = nil
+	s.mu.Unlock()
 
-	if len(result) == 0 {
-		log.Debug().Str("output", string(output)).Msg("No fans found in IPMI output")
+	// Notify all waiters
+	for _, w := range waiters {
+		close(w)
 	}
 
 	return result, nil
 }
 
-// GetFanDutyCycles reads current duty cycle percentages for all fans (ASRock Rack)
+// GetFanDutyCycles reads current duty cycle percentages for all fans
 // Returns a map of fan index (0-15) to duty cycle percentage (0-100)
 func (s *IPMIService) GetFanDutyCycles(ctx context.Context) (map[int]int, error) {
-	// Try ASRock Rack ROMED8 command: raw 0x3a 0xd7
+	// Use driver if available
+	s.mu.RLock()
+	driver := s.driver
+	s.mu.RUnlock()
+	
+	if driver != nil {
+		return driver.GetFanDutyCycles(ctx)
+	}
+	
+	// Fallback to legacy implementation (ASRock Rack ROMED8)
 	output, err := s.runCommand(ctx, "raw", "0x3a", "0xd7")
 	if err != nil {
 		log.Debug().Err(err).Msg("Failed to get fan duty cycles via raw command")
@@ -251,31 +425,35 @@ type FanReading struct {
 }
 
 // GetFanReadings returns comprehensive fan data including both RPM and duty cycle
+// Reuses GetFanSpeeds cache to avoid duplicate IPMI calls
 func (s *IPMIService) GetFanReadings(ctx context.Context) (map[string]FanReading, error) {
-	result := make(map[string]FanReading)
-
-	// Get RPM readings
-	output, err := s.runCommand(ctx, "sdr", "list", "full")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get fan speeds: %w", err)
+	// Check our own cache first
+	s.mu.RLock()
+	if s.cachedFanReadings != nil && time.Since(s.cachedFanReadingsAt) < s.cacheTTL {
+		result := make(map[string]FanReading, len(s.cachedFanReadings))
+		for k, v := range s.cachedFanReadings {
+			result[k] = v
+		}
+		s.mu.RUnlock()
+		return result, nil
 	}
+	s.mu.RUnlock()
 
-	fans, err := s.parseFanSensors(string(output))
+	// Get RPM readings via GetFanSpeeds (which has its own caching/coalescing)
+	speeds, err := s.GetFanSpeeds(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, fan := range fans {
-		result[fan.SensorID] = FanReading{RPM: fan.RPM}
+	result := make(map[string]FanReading)
+	for sensorID, rpm := range speeds {
+		result[sensorID] = FanReading{RPM: rpm}
 	}
 
-	// Try to get duty cycles (ASRock Rack specific)
+	// Try to get duty cycles (this is a quick call)
 	duties, err := s.GetFanDutyCycles(ctx)
 	if err == nil {
-		// Map duty cycles to fan sensors by index
-		// FAN1 -> index 0, FAN2 -> index 1, etc.
 		for sensorID, reading := range result {
-			// Extract fan number from sensor ID (e.g., "FAN1" -> 1, "FAN7" -> 7)
 			var fanNum int
 			if _, err := fmt.Sscanf(sensorID, "FAN%d", &fanNum); err == nil && fanNum >= 1 && fanNum <= 16 {
 				if duty, ok := duties[fanNum-1]; ok {
@@ -285,6 +463,12 @@ func (s *IPMIService) GetFanReadings(ctx context.Context) (map[string]FanReading
 			}
 		}
 	}
+
+	// Update our cache
+	s.mu.Lock()
+	s.cachedFanReadings = result
+	s.cachedFanReadingsAt = time.Now()
+	s.mu.Unlock()
 
 	return result, nil
 }
@@ -298,6 +482,16 @@ func (s *IPMIService) SetFanSpeed(ctx context.Context, zone int, percent int) er
 		percent = 100
 	}
 
+	// Use driver if available
+	s.mu.RLock()
+	driver := s.driver
+	s.mu.RUnlock()
+	
+	if driver != nil {
+		return driver.SetFanSpeed(ctx, zone, percent)
+	}
+	
+	// Fallback to legacy implementation
 	// Check for cached format
 	s.mu.RLock()
 	cachedFormat := s.speedFormat
@@ -336,6 +530,7 @@ func (s *IPMIService) setFanSpeedWithFormat(ctx context.Context, zone int, perce
 		}
 		
 		// Build the 16-byte command with current zone speeds
+		// Preserve speeds for fans not in the target zone
 		args := make([]string, 16)
 		for i := 0; i < 16; i++ {
 			args[i] = fmt.Sprintf("0x%02x", s.zoneSpeeds[i])
@@ -478,11 +673,31 @@ func (s *IPMIService) detectAndSetFanSpeed(ctx context.Context, zone int, percen
 
 // SetAllFanSpeeds sets all fans to the same speed
 func (s *IPMIService) SetAllFanSpeeds(ctx context.Context, percent int) error {
+	// Use driver if available
+	s.mu.RLock()
+	driver := s.driver
+	s.mu.RUnlock()
+	
+	if driver != nil {
+		return driver.SetAllFanSpeeds(ctx, percent)
+	}
+	
+	// Fallback to legacy implementation
 	return s.SetFanSpeed(ctx, 0, percent)
 }
 
 // SetManualMode enables or disables manual fan control
 func (s *IPMIService) SetManualMode(ctx context.Context, enabled bool) error {
+	// Use driver if available
+	s.mu.RLock()
+	driver := s.driver
+	s.mu.RUnlock()
+	
+	if driver != nil {
+		return driver.SetManualMode(ctx, enabled)
+	}
+	
+	// Fallback to legacy implementation
 	s.mu.Lock()
 	s.manualMode = enabled
 	cachedFormat := s.modeFormat
@@ -612,6 +827,15 @@ func (s *IPMIService) detectAndSetManualMode(ctx context.Context, enabled bool) 
 
 // IsManualMode returns whether manual mode is enabled
 func (s *IPMIService) IsManualMode() bool {
+	// Use driver if available
+	s.mu.RLock()
+	if s.driver != nil {
+		s.mu.RUnlock()
+		return s.driver.IsManualMode()
+	}
+	s.mu.RUnlock()
+	
+	// Fallback to legacy implementation
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.manualMode

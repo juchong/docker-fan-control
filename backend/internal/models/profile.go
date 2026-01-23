@@ -17,11 +17,13 @@ type Profile struct {
 	IsActive        bool            `json:"is_active" gorm:"default:false"`
 	Priority        int             `json:"priority" gorm:"default:0"` // Higher = takes precedence
 	Zones           IntSlice        `json:"zones" gorm:"type:json"`    // Fan zones this profile controls
+	SmoothTransition bool            `json:"smooth_transition" gorm:"default:true"` // Enable smooth speed transitions
+	TransitionTime  int             `json:"transition_time" gorm:"default:10"` // Transition time in seconds (0-300)
+	MinRunTime      int             `json:"min_run_time" gorm:"default:30"` // Minimum time fan must run at speed in seconds
+	Hysteresis      float64         `json:"hysteresis" gorm:"default:2.0"` // Temperature hysteresis to prevent rapid toggling
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 
-	// Relations (deprecated, use Zones instead)
-	Fans   []Fan          `json:"fans,omitempty" gorm:"many2many:profile_fans;"`
 	Inputs []ProfileInput `json:"inputs,omitempty" gorm:"foreignKey:ProfileID"`
 }
 
@@ -127,11 +129,7 @@ const (
 	InputTypeGPULoad   = "gpu_load"
 	InputTypeCPUTemp   = "cpu_temp"
 	InputTypeCPULoad   = "cpu_load"
-	InputTypeMaxTemp   = "max_temp"   // Maximum of all GPU temps
-	InputTypeAvgTemp   = "avg_temp"   // Average of all GPU temps
-	InputTypeDriveTemp = "drive_temp" // Individual drive temperature by index
-	InputTypeMaxDrive  = "max_drive"  // Maximum of all drive temps
-	InputTypeMaxCPU    = "max_cpu"    // Maximum of all CPU package temps
+	InputTypeDriveTemp = "drive_temp"
 )
 
 // Aggregation methods
@@ -150,8 +148,11 @@ type CreateProfileRequest struct {
 	AlgorithmParams AlgorithmParams `json:"algorithm_params"`
 	Priority        int             `json:"priority,omitempty"`
 	Zones           []int           `json:"zones,omitempty"`
-	FanIDs          []uint          `json:"fan_ids,omitempty"` // Deprecated, use Zones
 	Inputs          []ProfileInput  `json:"inputs,omitempty"`
+	SmoothTransition bool            `json:"smooth_transition,omitempty"`
+	TransitionTime  int             `json:"transition_time,omitempty"`
+	MinRunTime      int             `json:"min_run_time,omitempty"`
+	Hysteresis      float64         `json:"hysteresis,omitempty"`
 }
 
 // UpdateProfileRequest is the API request for updating a profile
@@ -162,8 +163,11 @@ type UpdateProfileRequest struct {
 	AlgorithmParams *AlgorithmParams `json:"algorithm_params,omitempty"`
 	Priority        *int             `json:"priority,omitempty"`
 	Zones           *[]int           `json:"zones,omitempty"`
-	FanIDs          *[]uint          `json:"fan_ids,omitempty"` // Deprecated, use Zones
 	Inputs          *[]ProfileInput  `json:"inputs,omitempty"`
+	SmoothTransition *bool           `json:"smooth_transition,omitempty"`
+	TransitionTime  *int            `json:"transition_time,omitempty"`
+	MinRunTime      *int            `json:"min_run_time,omitempty"`
+	Hysteresis      *float64        `json:"hysteresis,omitempty"`
 }
 
 // ProfileSummary is a lightweight profile representation
@@ -175,6 +179,5 @@ type ProfileSummary struct {
 	IsActive    bool   `json:"is_active"`
 	Zones       []int  `json:"zones"`
 	ZoneCount   int    `json:"zone_count"`
-	FanCount    int    `json:"fan_count"` // Deprecated
 	InputCount  int    `json:"input_count"`
 }

@@ -166,9 +166,8 @@ func (h *ProfilesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	profile, _ := h.profiles.Get(r.Context(), uint(id))
 
 	// Deactivate if active
-	activeID := h.controller.GetActiveProfileID()
-	if activeID != nil && *activeID == uint(id) {
-		h.controller.SetActiveProfile(nil)
+	if profile != nil && profile.IsActive {
+		h.controller.DeactivateProfile(uint(id))
 	}
 
 	if err := h.profiles.Delete(r.Context(), uint(id)); err != nil {
@@ -209,8 +208,8 @@ func (h *ProfilesHandler) Activate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	profileID := uint(id)
-	h.controller.SetActiveProfile(&profileID)
+	// Activate the profile by setting is_active flag
+	h.controller.ActivateProfile(uint(id))
 
 	h.logger.LogProfileActivated(profile.Name, profile.ID)
 
@@ -229,13 +228,8 @@ func (h *ProfilesHandler) Deactivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeID := h.controller.GetActiveProfileID()
-	if activeID == nil || *activeID != uint(id) {
-		http.Error(w, "Profile is not active", http.StatusBadRequest)
-		return
-	}
-
-	h.controller.SetActiveProfile(nil)
+	// Deactivate the profile by clearing is_active flag
+	h.controller.DeactivateProfile(uint(id))
 
 	h.logger.Info(models.CategoryProfile, "Profile deactivated", models.JSONMap{
 		"profile_id": id,

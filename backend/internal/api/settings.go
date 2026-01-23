@@ -60,6 +60,27 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// Apply the format to the IPMI service
 		h.ipmi.SetCommandFormat(services.ParseIPMIFormat(*req.IPMICommandFormat))
 	}
+	
+	// Update motherboard settings
+	if req.MotherboardVendor != nil {
+		database.SetSetting(models.SettingMotherboardVendor, *req.MotherboardVendor)
+	}
+	if req.MotherboardModel != nil {
+		database.SetSetting(models.SettingMotherboardModel, *req.MotherboardModel)
+	}
+	if req.MotherboardDriver != nil {
+		database.SetSetting(models.SettingMotherboardDriver, *req.MotherboardDriver)
+		// Apply the driver selection
+		h.applyMotherboardDriver(*req.MotherboardDriver)
+	}
+	
+	// Update zone layout
+	if req.ZoneLayout != nil {
+		zoneLayoutBytes, err := json.Marshal(req.ZoneLayout)
+		if err == nil {
+			database.SetSetting(models.SettingZoneLayout, string(zoneLayoutBytes))
+		}
+	}
 
 	// Update control settings
 	if req.ControlInterval != nil {
@@ -117,6 +138,118 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Return updated settings
 	updatedSettings, _ := database.GetAllSettings()
 	writeJSON(w, updatedSettings)
+}
+
+// applyMotherboardDriver sets the IPMI driver based on motherboard selection
+func (h *SettingsHandler) applyMotherboardDriver(driverName string) {
+	registry := h.ipmi.GetDriverRegistry()
+	
+	// Find the driver by name
+	driver := registry.GetDriverByVendor(driverName)
+	if driver != nil {
+		h.ipmi.SetDriver(driver)
+	}
+}
+
+// DetectMotherboard handles POST /api/settings/detect-motherboard
+func (h *SettingsHandler) DetectMotherboard(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	
+	// Detect the best driver (drivers are registered at startup in main.go)
+	err := h.ipmi.DetectAndSetDriver(ctx)
+	if err != nil {
+		writeJSON(w, map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+	
+	// Get the detected driver info
+	driver := h.ipmi.GetCurrentDriver()
+	var driverInfo map[string]any
+	if driver != nil {
+		caps := driver.GetCapabilities()
+		zoneLayout := driver.GetZoneLayout()
+		
+		// Serialize zone layout
+		zones := make([]map[string]any, len(zoneLayout.Zones))
+		for i, zone := range zoneLayout.Zones {
+			zones[i] = map[string]any{
+				"id":           zone.ID,
+				"name":         zone.Name,
+				"fan_indices":  zone.FanIndices,
+				"description": zone.Description,
+				"is_default":  zone.IsDefault,
+			}
+		}
+		
+		driverInfo = map[string]any{
+			"vendor":       driver.GetVendor(),
+			"model":        driver.GetModel(),
+			"capabilities": map[string]any{
+				"supports_manual_mode":       caps.SupportsManualMode,
+				"supports_duty_cycle_reading": caps.SupportsDutyCycleReading,
+				"supports_per_zone_control":   caps.SupportsPerZoneControl,
+				"max_zones":                 caps.MaxZones,
+				"max_fans":                  caps.MaxFans,
+				"has_static_rpm_values":      caps.HasStaticRPMValues,
+			},
+			"zone_layout": map[string]any{
+				"zones": zones,
+			},
+		}
+		
+		// Save detected motherboard info
+		database.SetSetting(models.SettingMotherboardVendor, driver.GetVendor())
+		database.SetSetting(models.SettingMotherboardModel, driver.GetModel())
+		database.SetSetting(models.SettingMotherboardDriver, driver.GetVendor())
+	}
+	
+	writeJSON(w, map[string]any{
+		"success":      true,
+		"driver":       driverInfo,
+		"message":      "Motherboard detection completed",
+	})
+}
+
+// GetAvailableDrivers handles GET /api/settings/drivers
+func (h *SettingsHandler) GetAvailableDrivers(w http.ResponseWriter, r *http.Request) {
+	registry := h.ipmi.GetDriverRegistry()
+	drivers := registry.GetAllDriverInfo()
+	
+	driverList := make([]map[string]any, len(drivers))
+	for i, driver := range drivers {
+		// Serialize zone layout
+		zones := make([]map[string]any, len(driver.ZoneLayout.Zones))
+		for j, zone := range driver.ZoneLayout.Zones {
+			zones[j] = map[string]any{
+				"id":           zone.ID,
+				"name":         zone.Name,
+				"fan_indices":  zone.FanIndices,
+				"description": zone.Description,
+				"is_default":  zone.IsDefault,
+			}
+		}
+		
+		driverList[i] = map[string]any{
+			"vendor":       driver.Vendor,
+			"model":        driver.Model,
+			"capabilities": map[string]any{
+				"supports_manual_mode":       driver.Capabilities.SupportsManualMode,
+				"supports_duty_cycle_reading": driver.Capabilities.SupportsDutyCycleReading,
+				"supports_per_zone_control":   driver.Capabilities.SupportsPerZoneControl,
+				"max_zones":                 driver.Capabilities.MaxZones,
+				"max_fans":                  driver.Capabilities.MaxFans,
+				"has_static_rpm_values":      driver.Capabilities.HasStaticRPMValues,
+			},
+			"zone_layout": map[string]any{
+				"zones": zones,
+			},
+		}
+	}
+	
+	writeJSON(w, driverList)
 }
 
 // TestIPMI handles POST /api/settings/test-ipmi

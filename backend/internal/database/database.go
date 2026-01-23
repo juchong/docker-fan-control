@@ -1,6 +1,7 @@
 package database
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -174,6 +175,38 @@ func GetAllSettings() (*models.AppSettings, error) {
 		case models.SettingSafetyOnShutdown:
 			if v, ok := s.Value.Data.(bool); ok {
 				result.SafetyOnShutdown = v
+			}
+		case models.SettingMotherboardVendor:
+			if v, ok := s.Value.Data.(string); ok {
+				result.MotherboardVendor = v
+			}
+		case models.SettingMotherboardModel:
+			if v, ok := s.Value.Data.(string); ok {
+				result.MotherboardModel = v
+			}
+		case models.SettingMotherboardDriver:
+			if v, ok := s.Value.Data.(string); ok {
+				result.MotherboardDriver = v
+			}
+		case models.SettingZoneLayout:
+			if v, ok := s.Value.Data.(string); ok {
+				var zoneLayout models.ZoneLayout
+				if err := json.Unmarshal([]byte(v), &zoneLayout); err == nil {
+					result.ZoneLayout = &zoneLayout
+				}
+			} else if v, ok := s.Value.Data.(map[string]interface{}); ok {
+				// Handle if stored as JSON object directly
+				jsonData, _ := json.Marshal(v)
+				var zoneLayout models.ZoneLayout
+				if err := json.Unmarshal(jsonData, &zoneLayout); err == nil {
+					result.ZoneLayout = &zoneLayout
+				}
+			} else if v, ok := s.Value.Data.([]byte); ok {
+				// Handle if stored as raw bytes
+				var zoneLayout models.ZoneLayout
+				if err := json.Unmarshal(v, &zoneLayout); err == nil {
+					result.ZoneLayout = &zoneLayout
+				}
 			}
 		}
 	}

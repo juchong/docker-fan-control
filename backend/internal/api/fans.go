@@ -51,11 +51,6 @@ func (h *FansHandler) List(w http.ResponseWriter, r *http.Request) {
 			status.CurrentRPM = rpm
 		}
 
-		// Get assigned profiles
-		if profiles, err := h.fans.GetFanProfiles(r.Context(), fan.ID); err == nil {
-			status.AssignedProfiles = profiles
-		}
-
 		response = append(response, status)
 	}
 
@@ -85,7 +80,7 @@ func (h *FansHandler) Detect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, savedFans)
 }
 
-// Update handles PUT /api/fans/{id}
+// Update handles PUT /api/fans/{id} - only label can be changed (zones are in settings)
 func (h *FansHandler) Update(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -94,13 +89,16 @@ func (h *FansHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req models.UpdateFanRequest
+	var req struct {
+		Label *string `json:"label,omitempty"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	fan, err := h.fans.Update(r.Context(), uint(id), &req)
+	updateReq := &models.UpdateFanRequest{Label: req.Label}
+	fan, err := h.fans.Update(r.Context(), uint(id), updateReq)
 	if err != nil {
 		if err == services.ErrFanNotFound {
 			http.Error(w, "Fan not found", http.StatusNotFound)
@@ -110,7 +108,7 @@ func (h *FansHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info(models.CategoryFan, "Fan updated", models.JSONMap{
+	h.logger.Info(models.CategoryFan, "Fan label updated", models.JSONMap{
 		"fan_id": fan.ID,
 		"label":  fan.Label,
 	})

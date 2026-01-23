@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,13 +26,14 @@ type FanController struct {
 	mu        sync.RWMutex
 
 	// Current state
-	activeProfileID *uint
 	manualOverrides map[uint]int // fan ID -> percent
 	lastSpeeds      map[int]int  // zone -> percent
+	zoneLastChanged map[int]time.Time // zone -> last change time
+	zoneTargetSpeeds map[int]int  // zone -> target speed (for smoothing)
 	emergencyTemp   float64
 	emergencySpeed  int
-	warningTemp     float64
-	warningEnabled  bool
+	warningTemp    float64
+	warningEnabled bool
 }
 
 // NewFanController creates a new fan controller
@@ -45,6 +47,8 @@ func NewFanController(ipmi *IPMIService, gpu *GPUService, system *SystemService,
 		stopCh:          make(chan struct{}),
 		manualOverrides: make(map[uint]int),
 		lastSpeeds:      make(map[int]int),
+		zoneLastChanged: make(map[int]time.Time),
+		zoneTargetSpeeds: make(map[int]int),
 		emergencyTemp:   90,
 		emergencySpeed:  100,
 		warningTemp:     70,
@@ -98,17 +102,22 @@ func (c *FanController) StopWithSafety(setSafeSpeed bool) {
 	// Safety: Set fans to 100% before stopping
 	if setSafeSpeed {
 		log.Info().Msg("Setting fans to 100% for safety on shutdown")
+		// Ensure manual mode is enabled so our speed setting is respected
+		if err := c.ipmi.SetManualMode(ctx, true); err != nil {
+			log.Warn().Err(err).Msg("Failed to ensure manual mode for safety shutdown")
+		}
 		if err := c.ipmi.SetAllFanSpeeds(ctx, 100); err != nil {
 			log.Error().Err(err).Msg("Failed to set safe fan speed on shutdown")
 			c.logger.LogIPMIError("safety shutdown fan speed", err)
 		} else {
 			c.logger.LogSystemEvent("Safety: fans set to 100% on shutdown", nil)
 		}
-	}
-
-	// Restore automatic fan control (BMC takes over)
-	if err := c.ipmi.SetManualMode(ctx, false); err != nil {
-		log.Warn().Err(err).Msg("Failed to restore automatic fan control")
+		// Leave manual mode enabled so fans stay at 100%
+	} else {
+		// Only restore automatic fan control if safety mode is disabled
+		if err := c.ipmi.SetManualMode(ctx, false); err != nil {
+			log.Warn().Err(err).Msg("Failed to restore automatic fan control")
+		}
 	}
 
 	c.logger.LogSystemEvent("Fan control service stopped", nil)
@@ -126,22 +135,6 @@ func (c *FanController) SetInterval(interval time.Duration) {
 	c.mu.Unlock()
 }
 
-// SetActiveProfile activates or deactivates a profile
-// Multiple profiles can be active simultaneously if they control different zones
-func (c *FanController) SetActiveProfile(profileID *uint) {
-	c.mu.Lock()
-	c.activeProfileID = profileID
-	c.mu.Unlock()
-
-	// Update database - now just toggles the single profile
-	if profileID != nil {
-		database.SetSetting(models.SettingActiveProfileID, *profileID)
-		database.DB.Model(&models.Profile{}).Where("id = ?", *profileID).Update("is_active", true)
-	} else {
-		database.SetSetting(models.SettingActiveProfileID, nil)
-	}
-}
-
 // ActivateProfile activates a specific profile (allows multiple active)
 func (c *FanController) ActivateProfile(profileID uint) {
 	database.DB.Model(&models.Profile{}).Where("id = ?", profileID).Update("is_active", true)
@@ -150,13 +143,6 @@ func (c *FanController) ActivateProfile(profileID uint) {
 // DeactivateProfile deactivates a specific profile
 func (c *FanController) DeactivateProfile(profileID uint) {
 	database.DB.Model(&models.Profile{}).Where("id = ?", profileID).Update("is_active", false)
-}
-
-// GetActiveProfileID returns the current active profile ID
-func (c *FanController) GetActiveProfileID() *uint {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.activeProfileID
 }
 
 // SetManualOverride sets a manual speed override for a fan
@@ -197,14 +183,6 @@ func (c *FanController) loadSettings() {
 	c.emergencySpeed = settings.EmergencySpeed
 	c.warningTemp = float64(settings.WarningTemp)
 	c.warningEnabled = settings.WarningEnabled
-
-	// Load active profile
-	if val, err := database.GetSetting(models.SettingActiveProfileID); err == nil {
-		if id, ok := val.(float64); ok {
-			profileID := uint(id)
-			c.activeProfileID = &profileID
-		}
-	}
 }
 
 // controlLoop runs the main control loop
@@ -259,18 +237,27 @@ func (c *FanController) controlCycle(ctx context.Context) {
 
 	// Load ALL active profiles (supports multiple simultaneous profiles)
 	var profiles []models.Profile
-	if err := database.DB.Preload("Fans").Preload("Inputs").Where("is_active = ?", true).Find(&profiles).Error; err != nil {
-		log.Warn().Err(err).Msg("Failed to load active profiles")
+	if err := database.DB.Preload("Inputs").Where("is_active = ?", true).Find(&profiles).Error; err != nil {
+		log.Error().Err(err).Msg("Failed to load active profiles")
 		return
 	}
 
 	if len(profiles) == 0 {
+		log.Debug().Msg("No active profiles")
 		return // No active profiles
 	}
 
+	// Sort profiles by priority (highest first)
+	sort.Slice(profiles, func(i, j int) bool {
+		return profiles[i].Priority > profiles[j].Priority
+	})
+
 	// Collect zone targets from all profiles
-	// Higher speed wins if multiple profiles target the same zone
+	// Higher priority profiles win, then highest speed wins for same priority
 	zoneTargets := make(map[int]int)
+	zoneControllingProfile := make(map[int]uint) // Track which profile controls each zone
+	zoneControllingPriority := make(map[int]int)  // Track priority of controlling profile
+	zoneConflictCount := make(map[int]int)        // Track conflict count per zone
 	hasAnyZones := false
 
 	for _, profile := range profiles {
@@ -285,91 +272,117 @@ func (c *FanController) controlCycle(ctx context.Context) {
 		if len(profile.Zones) > 0 {
 			hasAnyZones = true
 			for _, zone := range profile.Zones {
-				// Use highest target if multiple profiles share a zone (safety)
-				if existing, ok := zoneTargets[zone]; ok {
-					if targetSpeed > existing {
-						zoneTargets[zone] = targetSpeed
-					}
-				} else {
+			// Check if this zone already has a controlling profile with higher priority
+			if existingPriority, ok := zoneControllingPriority[zone]; ok {
+				// Only update if this profile has higher priority
+				if profile.Priority > existingPriority {
 					zoneTargets[zone] = targetSpeed
+					zoneControllingProfile[zone] = profile.ID
+					zoneControllingPriority[zone] = profile.Priority
+					log.Info().Int("zone", zone).Uint("profile_id", profile.ID).Str("profile_name", profile.Name).Int("priority", profile.Priority).Int("old_priority", existingPriority).Msg("Profile conflict resolved: higher priority profile took control")
+					zoneConflictCount[zone]++
+				} else if profile.Priority == existingPriority && targetSpeed > zoneTargets[zone] {
+					// If same priority, use highest speed
+					zoneTargets[zone] = targetSpeed
+					log.Info().Int("zone", zone).Uint("profile_id", profile.ID).Str("profile_name", profile.Name).Int("priority", profile.Priority).Int("speed", targetSpeed).Msg("Profile conflict resolved: same priority, higher speed selected")
+					zoneConflictCount[zone]++
+				} else {
+					log.Warn().Int("zone", zone).Uint("profile_id", profile.ID).Str("profile_name", profile.Name).Int("priority", profile.Priority).Int("existing_priority", existingPriority).Msg("Profile conflict: lower priority profile skipped")
+					zoneConflictCount[zone]++
+				}
+				} else {
+					// No existing profile, claim this zone
+					zoneTargets[zone] = targetSpeed
+					zoneControllingProfile[zone] = profile.ID
+					zoneControllingPriority[zone] = profile.Priority
+					log.Debug().Int("zone", zone).Uint("profile_id", profile.ID).Int("priority", profile.Priority).Msg("Profile claimed zone")
 				}
 			}
-			// Skip backward compatibility code if Zones is configured
+			// Continue to next profile - zones are handled above
 			continue
 		}
-
-		// Backward compatibility: check fans for zones (only if Zones is empty)
-		for _, fan := range profile.Fans {
-			// Check for manual override
-			if override, ok := manualOverrides[fan.ID]; ok {
-				if fan.IPMIZone != nil {
-					zoneTargets[*fan.IPMIZone] = override
-					hasAnyZones = true
-				}
-				continue
-			}
-
-			if fan.IPMIZone != nil {
-				hasAnyZones = true
-				// Use highest target if multiple fans share a zone
-				if existing, ok := zoneTargets[*fan.IPMIZone]; ok {
-					if targetSpeed > existing {
-						zoneTargets[*fan.IPMIZone] = targetSpeed
-					}
-				} else {
-					zoneTargets[*fan.IPMIZone] = targetSpeed
-				}
-			}
+		
+		// If no zones configured, skip this profile
+		continue
 		}
-	}
 
-	// If no zones assigned, set all fans to max target from all profiles
+	// If no zones assigned, skip this cycle (require zones to be configured)
 	if !hasAnyZones {
-		maxTargetSpeed := 0
-		for _, profile := range profiles {
-			inputValue := c.calculateInputValue(&profile, inputs)
-			algo := algorithms.NewAlgorithm(profile.Algorithm, profile.AlgorithmParams)
-			targetSpeed := algo.Calculate(inputValue)
-			if targetSpeed > maxTargetSpeed {
-				maxTargetSpeed = targetSpeed
-			}
-		}
-
-		c.mu.RLock()
-		lastSpeed := c.lastSpeeds[-1] // Use -1 as "all fans" zone
-		c.mu.RUnlock()
-
-		if maxTargetSpeed != lastSpeed {
-			log.Debug().Int("target", maxTargetSpeed).Int("last", lastSpeed).Msg("Setting all fans (no zones assigned)")
-			if err := c.ipmi.SetAllFanSpeeds(ctx, maxTargetSpeed); err != nil {
-				c.logger.LogIPMIError("set all fan speeds", err)
-			} else {
-				c.mu.Lock()
-				c.lastSpeeds[-1] = maxTargetSpeed
-				c.mu.Unlock()
-				log.Info().Int("percent", maxTargetSpeed).Msg("Fan speed updated")
-			}
-		}
+		log.Warn().Msg("No profiles with zone assignments found")
+		c.logger.LogSystemEvent("No profiles with zone assignments", models.JSONMap{
+			"active_profiles": len(profiles),
+		})
 		return
 	}
 
-	// Apply zone targets
-	for zone, speed := range zoneTargets {
+	// Apply zone targets with smoothing and minimum run time
+	for zone, targetSpeed := range zoneTargets {
 		c.mu.RLock()
 		lastSpeed := c.lastSpeeds[zone]
+		lastChanged := c.zoneLastChanged[zone]
+		currentTarget := c.zoneTargetSpeeds[zone]
 		c.mu.RUnlock()
 
-		if speed != lastSpeed {
-			if err := c.ipmi.SetFanSpeed(ctx, zone, speed); err != nil {
+		// Check minimum run time
+		if !lastChanged.IsZero() && time.Since(lastChanged) < time.Duration(30*time.Second) {
+			// Respect minimum run time
+			if err := c.ipmi.SetFanSpeed(ctx, zone, lastSpeed); err != nil {
+				c.logger.LogIPMIError("set fan speed", err)
+			}
+			continue
+		}
+
+		// Apply smoothing if enabled (default)
+		finalSpeed := targetSpeed
+		if currentTarget != targetSpeed {
+			// Calculate intermediate speed for smooth transition
+			// Simple linear interpolation based on time
+			elapsed := time.Since(lastChanged)
+			transitionTime := 10 * time.Second // Default transition time
+			
+			// Calculate percentage of transition complete
+			progress := float64(elapsed) / float64(transitionTime)
+			if progress > 1.0 {
+				progress = 1.0
+			}
+			
+			// Interpolate between current and target
+			finalSpeed = int(float64(lastSpeed) + (float64(targetSpeed) - float64(lastSpeed)) * progress)
+			
+			// Ensure we don't skip over the target
+			if (targetSpeed > lastSpeed && finalSpeed > targetSpeed) || (targetSpeed < lastSpeed && finalSpeed < targetSpeed) {
+				finalSpeed = targetSpeed
+			}
+		}
+
+		// Only send command if speed changes significantly (more than 5%)
+		if finalSpeed != lastSpeed && abs(finalSpeed-lastSpeed) >= 5 {
+			if err := c.ipmi.SetFanSpeed(ctx, zone, finalSpeed); err != nil {
 				c.logger.LogIPMIError("set fan speed", err)
 			} else {
 				c.mu.Lock()
-				c.lastSpeeds[zone] = speed
+				c.lastSpeeds[zone] = finalSpeed
+				c.zoneLastChanged[zone] = time.Now()
+				c.zoneTargetSpeeds[zone] = targetSpeed
 				c.mu.Unlock()
-				log.Info().Int("zone", zone).Int("percent", speed).Msg("Fan speed updated")
+				log.Info().Int("zone", zone).Int("percent", finalSpeed).Int("target", targetSpeed).Msg("Fan speed updated")
 			}
 		}
 	}
+
+	// Log zone conflicts if any
+	for zone, count := range zoneConflictCount {
+		if count > 0 {
+			log.Warn().Int("zone", zone).Int("conflicts", count).Msg("Profile conflicts detected in this control cycle")
+			c.logger.LogSystemEvent("Profile conflict detected", models.JSONMap{
+				"zone": zone,
+				"conflict_count": count,
+				"controlling_profile": zoneControllingProfile[zone],
+				"controlling_priority": zoneControllingPriority[zone],
+			})
+		}
+	}
+
 }
 
 // gatherInputs collects all input metrics
@@ -383,52 +396,26 @@ func (c *FanController) gatherInputs() map[string]float64 {
 			inputs[models.InputTypeGPULoad+string(rune('0'+m.Index))] = float64(m.Load)
 		}
 
-		// Max and average GPU temps
-		if len(gpuMetrics) > 0 {
-			maxTemp := 0
-			totalTemp := 0
-			for _, m := range gpuMetrics {
-				if m.Temperature > maxTemp {
-					maxTemp = m.Temperature
-				}
-				totalTemp += m.Temperature
-			}
-			inputs[models.InputTypeMaxTemp] = float64(maxTemp)
-			inputs[models.InputTypeAvgTemp] = float64(totalTemp) / float64(len(gpuMetrics))
-		}
 	}
 
 	// System metrics
 	if sysMetrics, err := c.system.GetMetrics(); err == nil {
 		// CPU package temperatures
 		if len(sysMetrics.CPUPackages) > 0 {
-			maxCPUTemp := sysMetrics.CPUPackages[0].Temperature
 			for i, pkg := range sysMetrics.CPUPackages {
 				inputs[models.InputTypeCPUTemp+string(rune('0'+i))] = pkg.Temperature
-				if pkg.Temperature > maxCPUTemp {
-					maxCPUTemp = pkg.Temperature
-				}
 			}
-			inputs[models.InputTypeMaxCPU] = maxCPUTemp
-			// Legacy single CPU temp field (for backward compat)
-			inputs[models.InputTypeCPUTemp] = maxCPUTemp
+			// Single CPU temp field uses first package
+			inputs[models.InputTypeCPUTemp] = sysMetrics.CPUPackages[0].Temperature
 		} else if sysMetrics.CPUTemp != nil {
-			// Fallback to legacy single CPU temp
 			inputs[models.InputTypeCPUTemp] = *sysMetrics.CPUTemp
-			inputs[models.InputTypeMaxCPU] = *sysMetrics.CPUTemp
 		}
 
 		// Drive temperatures
 		if len(sysMetrics.Drives) > 0 {
-			maxDriveTemp := float64(sysMetrics.Drives[0].Temperature)
 			for i, drive := range sysMetrics.Drives {
-				temp := float64(drive.Temperature)
-				inputs[models.InputTypeDriveTemp+string(rune('0'+i))] = temp
-				if temp > maxDriveTemp {
-					maxDriveTemp = temp
-				}
+				inputs[models.InputTypeDriveTemp+string(rune('0'+i))] = float64(drive.Temperature)
 			}
-			inputs[models.InputTypeMaxDrive] = maxDriveTemp
 		}
 
 		inputs[models.InputTypeCPULoad] = sysMetrics.CPULoad
@@ -437,13 +424,9 @@ func (c *FanController) gatherInputs() map[string]float64 {
 	return inputs
 }
 
-// calculateInputValue calculates the aggregated input value for a profile
+// calculateInputValue calculates the combined input value for a profile
 func (c *FanController) calculateInputValue(profile *models.Profile, inputs map[string]float64) float64 {
 	if len(profile.Inputs) == 0 {
-		// Default to max GPU temp if no inputs specified
-		if maxTemp, ok := inputs[models.InputTypeMaxTemp]; ok {
-			return maxTemp
-		}
 		return 0
 	}
 
@@ -457,7 +440,6 @@ func (c *FanController) calculateInputValue(profile *models.Profile, inputs map[
 		switch input.InputType {
 		case models.InputTypeGPUTemp, models.InputTypeGPULoad,
 			models.InputTypeCPUTemp, models.InputTypeDriveTemp:
-			// Only append index if this is an indexed type (not aggregate like max_temp)
 			if input.InputIndex >= 0 {
 				key += string(rune('0' + input.InputIndex))
 			}
@@ -485,28 +467,22 @@ func (c *FanController) calculateInputValue(profile *models.Profile, inputs map[
 	return algorithms.AggregateInputs(values, aggregation, weights)
 }
 
+// abs returns absolute value
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // getMaxTemperature returns the maximum temperature from inputs
 func (c *FanController) getMaxTemperature(inputs map[string]float64) float64 {
 	maxTemp := 0.0
 
-	// Check aggregate temps first
-	aggregateKeys := []string{
-		models.InputTypeMaxTemp,
-		models.InputTypeMaxCPU,
-		models.InputTypeMaxDrive,
-	}
-	for _, key := range aggregateKeys {
-		if val, ok := inputs[key]; ok && val > maxTemp {
-			maxTemp = val
-		}
-	}
-
-	// Also check individual temps in case aggregates aren't set
 	for key, val := range inputs {
 		isTemp := false
-		// Check if this is an individual temperature input
 		for _, prefix := range []string{models.InputTypeGPUTemp, models.InputTypeCPUTemp, models.InputTypeDriveTemp} {
-			if len(key) > len(prefix) && key[:len(prefix)] == prefix {
+			if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
 				isTemp = true
 				break
 			}
@@ -543,16 +519,11 @@ func (c *FanController) GetState() models.ControllerState {
 			state.ActiveProfiles = append(state.ActiveProfiles, p.Name)
 			state.ActiveProfileIDs = append(state.ActiveProfileIDs, p.ID)
 		}
-
-		// For backward compatibility, set single profile fields if there's exactly one
-		if len(profiles) == 1 {
-			state.ActiveProfileID = &profiles[0].ID
-			state.ActiveProfile = profiles[0].Name
-		}
 	}
 
 	return state
 }
+
 
 // UpdateSettings updates controller settings
 func (c *FanController) UpdateSettings(emergencyTemp, emergencySpeed, warningTemp float64, warningEnabled bool, interval time.Duration) {

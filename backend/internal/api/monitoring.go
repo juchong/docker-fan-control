@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"docker-fan-control/internal/database"
 	"docker-fan-control/internal/models"
 	"docker-fan-control/internal/services"
 )
@@ -25,6 +26,39 @@ func NewMonitoringHandler(gpu *services.GPUService, system *services.SystemServi
 func (h *MonitoringHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	monitoring := models.Monitoring{
 		Controller: h.controller.GetState(),
+	}
+
+	// Get motherboard information
+	if vendor, err := database.GetSetting(models.SettingMotherboardVendor); err == nil {
+		if v, ok := vendor.(string); ok && v != "" {
+			monitoring.Controller.MotherboardVendor = v
+		}
+	}
+	if model, err := database.GetSetting(models.SettingMotherboardModel); err == nil {
+		if m, ok := model.(string); ok && m != "" {
+			monitoring.Controller.MotherboardModel = m
+		}
+	}
+	if driver, err := database.GetSetting(models.SettingMotherboardDriver); err == nil {
+		if d, ok := driver.(string); ok && d != "" {
+			monitoring.Controller.MotherboardDriver = d
+		}
+	}
+
+	// Get current driver info
+	currentDriver := h.ipmi.GetCurrentDriver()
+	if currentDriver != nil {
+		monitoring.Controller.DriverVendor = currentDriver.GetVendor()
+		monitoring.Controller.DriverModel = currentDriver.GetModel()
+		caps := currentDriver.GetCapabilities()
+		monitoring.Controller.DriverCapabilities = models.DriverCapabilities{
+			SupportsManualMode:       caps.SupportsManualMode,
+			SupportsDutyCycleReading: caps.SupportsDutyCycleReading,
+			SupportsPerZoneControl:   caps.SupportsPerZoneControl,
+			MaxZones:                 caps.MaxZones,
+			MaxFans:                  caps.MaxFans,
+			HasStaticRPMValues:       caps.HasStaticRPMValues,
+		}
 	}
 
 	// Get GPU metrics
@@ -104,10 +138,6 @@ func (h *MonitoringHandler) GetFanStatus(w http.ResponseWriter, r *http.Request)
 
 		if rpm, ok := speeds[fan.IPMISensorID]; ok {
 			status.CurrentRPM = rpm
-		}
-
-		if profiles, err := h.fans.GetFanProfiles(r.Context(), fan.ID); err == nil {
-			status.AssignedProfiles = profiles
 		}
 
 		response = append(response, status)

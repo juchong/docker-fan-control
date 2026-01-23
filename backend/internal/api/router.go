@@ -110,6 +110,8 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 			r.Get("/settings", settingsHandler.Get)
 			r.Put("/settings", settingsHandler.Update)
 			r.Post("/settings/test-ipmi", settingsHandler.TestIPMI)
+			r.Post("/settings/detect-motherboard", settingsHandler.DetectMotherboard)
+			r.Get("/settings/drivers", settingsHandler.GetAvailableDrivers)
 
 			// Controller
 			r.Post("/controller/start", settingsHandler.StartController)
