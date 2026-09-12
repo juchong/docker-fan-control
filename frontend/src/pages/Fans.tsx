@@ -243,6 +243,29 @@ export function Fans() {
             );
           })}
 
+          {isLoading && mergedFans.length === 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Card key={`skel-${i}`}>
+                  <div className="space-y-4" aria-hidden="true">
+                    <div className="flex items-center gap-3">
+                      <div className="skeleton w-10 h-10 rounded-lg" />
+                      <div className="flex-1 space-y-2">
+                        <div className="skeleton h-4 w-1/2" />
+                        <div className="skeleton h-3 w-1/3" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="skeleton h-16" />
+                      <div className="skeleton h-16" />
+                    </div>
+                    <div className="skeleton h-8 w-full" />
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+
           {mergedFans.length === 0 && !isLoading && (
             <div className="text-center py-12">
               <Fan className="w-12 h-12 text-surface-3 mx-auto mb-4" />

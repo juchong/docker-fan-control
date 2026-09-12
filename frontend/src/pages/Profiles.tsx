@@ -46,6 +46,7 @@ export function Profiles() {
     queryKey: ['profiles'],
     queryFn: profilesApi.list,
   });
+  const profileList = (profiles ?? []) as ProfileSummary[];
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['profiles'] });
@@ -118,7 +119,23 @@ export function Profiles() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {(profiles as ProfileSummary[] || []).map((profile) => (
+        {isLoading && profileList.length === 0 &&
+          Array.from({ length: 3 }).map((_, i) => (
+            <Card key={`skel-${i}`}>
+              <div className="space-y-4" aria-hidden="true">
+                <div className="flex items-center gap-3">
+                  <div className="skeleton w-10 h-10 rounded-lg" />
+                  <div className="flex-1 space-y-2">
+                    <div className="skeleton h-4 w-1/2" />
+                    <div className="skeleton h-3 w-1/3" />
+                  </div>
+                </div>
+                <div className="skeleton h-3 w-3/4" />
+                <div className="skeleton h-8 w-full" />
+              </div>
+            </Card>
+          ))}
+        {profileList.map((profile) => (
           <Card key={profile.id}>
             <div className="space-y-4">
               <div className="flex items-start justify-between">
@@ -156,10 +173,10 @@ export function Profiles() {
                     <Play className="w-4 h-4 mr-1" /> Activate
                   </Button>
                 )}
-                <Button variant="secondary" size="sm" onClick={() => handleEdit(profile.id)}>
+                <Button variant="secondary" size="sm" onClick={() => handleEdit(profile.id)} aria-label={`Edit ${profile.name}`}>
                   <Edit2 className="w-4 h-4" />
                 </Button>
-                <Button variant="danger" size="sm" onClick={() => handleDelete(profile)} isLoading={deleteMutation.isPending}>
+                <Button variant="danger" size="sm" onClick={() => handleDelete(profile)} isLoading={deleteMutation.isPending} aria-label={`Delete ${profile.name}`}>
                   <Trash2 className="w-4 h-4" />
                 </Button>
               </div>
@@ -167,7 +184,7 @@ export function Profiles() {
           </Card>
         ))}
 
-        {(profiles as ProfileSummary[] || []).length === 0 && !isLoading && (
+        {profileList.length === 0 && !isLoading && (
           <div className="col-span-full text-center py-12">
             <Settings2 className="w-12 h-12 text-surface-3 mx-auto mb-4" />
             <p className="text-muted">No profiles created</p>
@@ -257,6 +274,11 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
   });
   const [pidParams, setPidParams] = useState<PIDParams>({ setpoint: 70, kp: 2.0, ki: 0.1, kd: 1.0, min_speed: 30, max_speed: 100 });
 
+  // Unsaved-changes tracking: capture a snapshot of the seeded form, compare
+  // against the live form to warn before discarding edits on close.
+  const pristineRef = React.useRef('');
+  const [pendingSnapshot, setPendingSnapshot] = useState(false);
+
   useEffect(() => {
     if (profile) {
       setName(profile.name);
@@ -281,7 +303,34 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
       setSmoothTransition(true); setTransitionTime(10); setMinRunTime(30); setHysteresis(2);
       setLinearParams({ min_temp: 30, max_temp: 80, min_speed: 30, max_speed: 100 });
     }
+    // Capture the seeded state as the pristine baseline once it settles.
+    setPendingSnapshot(true);
   }, [profile, isOpen]);
+
+  const currentSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        name, description, algorithm, priority, selectedZones, selectedInputs,
+        inputAggregation, smoothTransition, transitionTime, minRunTime, hysteresis,
+        linearParams, stepParams, pidParams,
+      }),
+    [name, description, algorithm, priority, selectedZones, selectedInputs, inputAggregation,
+      smoothTransition, transitionTime, minRunTime, hysteresis, linearParams, stepParams, pidParams]
+  );
+
+  useEffect(() => {
+    if (pendingSnapshot) {
+      pristineRef.current = currentSnapshot;
+      setPendingSnapshot(false);
+    }
+  }, [pendingSnapshot, currentSnapshot]);
+
+  const isDirty = !pendingSnapshot && currentSnapshot !== pristineRef.current;
+
+  const handleClose = () => {
+    if (isDirty && !window.confirm('Discard unsaved changes to this profile?')) return;
+    onClose();
+  };
 
   const liveValue = (type: string, index: number): number | null => {
     switch (type) {
@@ -389,7 +438,7 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={profile ? 'Edit Profile' : 'Create Profile'} size="lg">
+    <Modal isOpen={isOpen} onClose={handleClose} title={profile ? 'Edit Profile' : 'Create Profile'} size="lg">
       <div className="space-y-4 max-h-[72vh] overflow-y-auto pr-1">
         {/* Basic Info */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -592,7 +641,7 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
         <div className="flex justify-between items-center gap-2 pt-4 border-t border-surface-2 sticky bottom-0 bg-surface">
           <span className="text-sm text-danger">{validationError}</span>
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={onClose}>Cancel</Button>
+            <Button variant="secondary" onClick={handleClose}>Cancel</Button>
             <Button onClick={handleSave} isLoading={isLoading} disabled={!!validationError}>
               {profile ? 'Update' : 'Create'}
             </Button>
