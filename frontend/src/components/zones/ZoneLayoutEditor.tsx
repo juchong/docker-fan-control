@@ -199,8 +199,8 @@ export function ZoneLayoutEditor({
     <div className="space-y-4">
       {/* Pending Changes Banner */}
       {pendingChanges && (
-        <div className="flex items-center justify-between p-3 bg-amber-900/50 border border-amber-700 rounded-lg">
-          <div className="flex items-center gap-2 text-amber-400">
+        <div className="flex items-center justify-between p-3 bg-warn/15 border border-warn/30 rounded-lg">
+          <div className="flex items-center gap-2 text-warn">
             <AlertTriangle className="w-5 h-5" />
             <span className="font-medium">You have unsaved changes</span>
           </div>
@@ -224,8 +224,8 @@ export function ZoneLayoutEditor({
             key={zone.id} 
             className={`border rounded-lg p-4 transition-colors ${
               zone.is_default 
-                ? 'border-blue-600 bg-blue-900/20' 
-                : 'border-slate-600 bg-slate-800/50'
+                ? 'border-primary-600 bg-info/15' 
+                : 'border-surface-3 bg-surface/50'
             }`}
           >
             {editingZone === zone.id ? (
@@ -268,17 +268,17 @@ export function ZoneLayoutEditor({
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-lg font-semibold text-slate-100">{zone.name}</span>
+                      <span className="text-lg font-semibold text-fg">{zone.name}</span>
                       {zone.is_default && (
-                        <span className="text-xs bg-blue-600 text-blue-100 px-2 py-0.5 rounded">
+                        <span className="text-xs bg-primary-600 text-info px-2 py-0.5 rounded">
                           Default
                         </span>
                       )}
                     </div>
                     {zone.description && (
-                      <p className="text-sm text-slate-400 mt-0.5">{zone.description}</p>
+                      <p className="text-sm text-muted mt-0.5">{zone.description}</p>
                     )}
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-muted-2 mt-1">
                       Zone ID: {zone.id} • {zone.fan_indices.length} fan{zone.fan_indices.length !== 1 ? 's' : ''} assigned
                     </p>
                   </div>
@@ -312,10 +312,10 @@ export function ZoneLayoutEditor({
                           onClick={() => handleFanToggle(zone.id, i)}
                           className={`p-2 rounded text-center transition-all ${
                             isInZone
-                              ? 'bg-blue-600 border-2 border-blue-500 text-white'
+                              ? 'bg-primary-600 border-2 border-primary-500 text-white'
                               : isDetected
-                                ? 'bg-slate-700 border border-slate-600 hover:border-blue-500 text-slate-300'
-                                : 'bg-slate-800 border border-slate-700 text-slate-500 opacity-50'
+                                ? 'bg-surface-2 border border-surface-3 hover:border-primary-500 text-fg-3'
+                                : 'bg-surface border border-surface-2 text-muted-2 opacity-50'
                           }`}
                           title={rpm ? `${rpm} RPM` : 'Not detected'}
                         >
@@ -337,7 +337,7 @@ export function ZoneLayoutEditor({
                 {!zone.is_default && (
                   <button
                     onClick={() => handleSetDefaultZone(zone.id)}
-                    className="text-sm text-slate-400 hover:text-blue-400 transition-colors"
+                    className="text-sm text-muted hover:text-info transition-colors"
                   >
                     Set as default zone
                   </button>
@@ -350,8 +350,8 @@ export function ZoneLayoutEditor({
 
       {/* Add Zone Button / Form */}
       {isAddingZone ? (
-        <div className="border border-slate-600 rounded-lg p-4 bg-slate-800/50">
-          <h4 className="font-medium text-slate-200 mb-3">Add New Zone</h4>
+        <div className="border border-surface-3 rounded-lg p-4 bg-surface/50">
+          <h4 className="font-medium text-fg-2 mb-3">Add New Zone</h4>
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
               <label className="input-label">Zone Name</label>
@@ -394,8 +394,8 @@ export function ZoneLayoutEditor({
 
       {/* Save Button (when no pending changes banner) */}
       {!pendingChanges && !compact && (
-        <div className="pt-4 border-t border-slate-700">
-          <p className="text-sm text-slate-400 mb-3">
+        <div className="pt-4 border-t border-surface-2">
+          <p className="text-sm text-muted mb-3">
             <Layers className="w-4 h-4 inline mr-1" />
             Zones group fans for profile-based control. Each profile can target specific zones.
           </p>

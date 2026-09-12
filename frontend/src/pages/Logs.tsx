@@ -68,7 +68,7 @@ export function Logs() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-100">Event Logs</h1>
+        <h1 className="text-2xl font-bold text-fg">Event Logs</h1>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={() => refetch()} isLoading={isLoading}>
             <RefreshCw className="w-4 h-4 mr-2" />
@@ -100,7 +100,7 @@ export function Logs() {
       {/* Filters */}
       <div className="flex flex-wrap gap-4 items-center">
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-400">Level:</label>
+          <label className="text-sm text-muted">Level:</label>
           <select
             className="select w-32"
             value={level}
@@ -119,7 +119,7 @@ export function Logs() {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-400">Category:</label>
+          <label className="text-sm text-muted">Category:</label>
           <select
             className="select w-32"
             value={category}
@@ -138,7 +138,7 @@ export function Logs() {
         </div>
 
         <div className="flex items-center gap-2 flex-1 max-w-md">
-          <Search className="w-4 h-4 text-slate-400" />
+          <Search className="w-4 h-4 text-muted" />
           <input
             type="text"
             className="input"
@@ -152,7 +152,7 @@ export function Logs() {
         </div>
 
         {logs && (
-          <span className="text-sm text-slate-400">
+          <span className="text-sm text-muted">
             {logs.total_count} total events
           </span>
         )}
@@ -173,7 +173,7 @@ export function Logs() {
             <tbody>
               {logs?.events?.map((event) => (
                 <tr key={event.id}>
-                  <td className="text-slate-400 whitespace-nowrap">
+                  <td className="text-muted whitespace-nowrap">
                     {new Date(event.timestamp).toLocaleString()}
                   </td>
                   <td>
@@ -181,13 +181,13 @@ export function Logs() {
                       {event.level}
                     </span>
                   </td>
-                  <td className="text-slate-400 capitalize">{event.category}</td>
-                  <td className="text-slate-300">{event.message}</td>
+                  <td className="text-muted capitalize">{event.category}</td>
+                  <td className="text-fg-3">{event.message}</td>
                 </tr>
               ))}
               {(!logs?.events || logs.events.length === 0) && (
                 <tr>
-                  <td colSpan={4} className="text-center text-slate-400 py-8">
+                  <td colSpan={4} className="text-center text-muted py-8">
                     No events found
                   </td>
                 </tr>
@@ -198,8 +198,8 @@ export function Logs() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-700">
-            <span className="text-sm text-slate-400">
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-surface-2">
+            <span className="text-sm text-muted">
               Page {page + 1} of {totalPages}
             </span>
             <div className="flex gap-2">

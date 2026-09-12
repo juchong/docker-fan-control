@@ -82,7 +82,7 @@ export function Profiles() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-100">Profiles</h1>
+        <h1 className="text-2xl font-bold text-fg">Profiles</h1>
         <Button onClick={() => setIsCreating(true)}>
           <Plus className="w-4 h-4 mr-2" />
           New Profile
@@ -90,9 +90,9 @@ export function Profiles() {
       </div>
 
       {error && (
-        <div className="p-3 bg-red-900/40 border border-red-800 rounded-lg text-red-300 flex items-center justify-between">
+        <div className="p-3 bg-danger/15 border border-danger/30 rounded-lg text-danger flex items-center justify-between">
           <span>{error}</span>
-          <button className="text-red-400 hover:text-red-200" onClick={() => setError(null)}>✕</button>
+          <button className="text-danger hover:text-danger" onClick={() => setError(null)}>✕</button>
         </div>
       )}
 
@@ -102,20 +102,20 @@ export function Profiles() {
             <div className="space-y-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${profile.is_active ? 'bg-green-900/50' : 'bg-slate-700'}`}>
-                    <Settings2 className={`w-6 h-6 ${profile.is_active ? 'text-green-400' : 'text-slate-500'}`} />
+                  <div className={`p-2 rounded-lg ${profile.is_active ? 'bg-ok/15' : 'bg-surface-2'}`}>
+                    <Settings2 className={`w-6 h-6 ${profile.is_active ? 'text-ok' : 'text-muted-2'}`} />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-slate-200">{profile.name}</h3>
-                    <p className="text-sm text-slate-400 capitalize">{profile.algorithm}</p>
+                    <h3 className="font-semibold text-fg-2">{profile.name}</h3>
+                    <p className="text-sm text-muted capitalize">{profile.algorithm}</p>
                   </div>
                 </div>
-                {profile.is_active && <CheckCircle className="w-5 h-5 text-green-400" />}
+                {profile.is_active && <CheckCircle className="w-5 h-5 text-ok" />}
               </div>
 
-              {profile.description && <p className="text-sm text-slate-400">{profile.description}</p>}
+              {profile.description && <p className="text-sm text-muted">{profile.description}</p>}
 
-              <div className="flex flex-col gap-1 text-sm text-slate-400">
+              <div className="flex flex-col gap-1 text-sm text-muted">
                 <div className="flex items-center gap-1">
                   <Layers className="w-4 h-4" />
                   <span>{getZoneDisplayNames(profile.zones)}</span>
@@ -148,9 +148,9 @@ export function Profiles() {
 
         {(profiles as ProfileSummary[] || []).length === 0 && !isLoading && (
           <div className="col-span-full text-center py-12">
-            <Settings2 className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-            <p className="text-slate-400">No profiles created</p>
-            <p className="text-sm text-slate-500 mt-1">Create a profile to configure fan control</p>
+            <Settings2 className="w-12 h-12 text-surface-3 mx-auto mb-4" />
+            <p className="text-muted">No profiles created</p>
+            <p className="text-sm text-muted-2 mt-1">Create a profile to configure fan control</p>
           </div>
         )}
       </div>
@@ -197,14 +197,14 @@ function InputGroup({ title, icon: Icon, iconColor, children, defaultExpanded = 
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   return (
-    <div className="border border-slate-600 rounded-lg overflow-hidden">
+    <div className="border border-surface-3 rounded-lg overflow-hidden">
       <button type="button" onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-2 bg-slate-700/50 hover:bg-slate-700 transition-colors">
+        className="w-full flex items-center justify-between p-2 bg-surface-2/50 hover:bg-surface-2 transition-colors">
         <div className="flex items-center gap-2">
           <Icon className={`w-4 h-4 ${iconColor}`} />
-          <span className="text-sm font-medium text-slate-200">{title}</span>
+          <span className="text-sm font-medium text-fg-2">{title}</span>
         </div>
-        {expanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+        {expanded ? <ChevronUp className="w-4 h-4 text-muted" /> : <ChevronDown className="w-4 h-4 text-muted" />}
       </button>
       {expanded && <div className="p-2 space-y-1 max-h-48 overflow-y-auto">{children}</div>}
     </div>
@@ -304,20 +304,20 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
   const setWeight = (key: string, w: number) =>
     setSelectedInputs(selectedInputs.map((i) => (inputKey(i) === key ? { ...i, weight: w } : i)));
 
-  const tempColor = (t: number) => (t < 50 ? 'text-blue-400' : t < 65 ? 'text-green-400' : t < 80 ? 'text-yellow-400' : 'text-red-400');
+  const tempColor = (t: number) => (t < 50 ? 'text-info' : t < 65 ? 'text-ok' : t < 80 ? 'text-warn' : 'text-danger');
 
   const renderCheckbox = (type: InputTypeConfig, index = 0, label?: string) => {
     const v = liveValue(type.value, index);
     const isTemp = type.value.includes('temp');
     return (
       <label key={`${type.value}-${index}`}
-        className="flex items-center justify-between p-2 bg-slate-700/30 rounded cursor-pointer hover:bg-slate-700/50">
+        className="flex items-center justify-between p-2 bg-surface-2/30 rounded cursor-pointer hover:bg-surface-2/50">
         <div className="flex items-center gap-2">
           <input type="checkbox" checked={isSelected(type.value, index)} onChange={() => toggleInput(type.value, index)} className="rounded" />
-          <span className="text-sm text-slate-300">{label || type.label}</span>
+          <span className="text-sm text-fg-3">{label || type.label}</span>
         </div>
         {v !== null && (
-          <span className={`text-sm font-mono ${isTemp ? tempColor(v) : 'text-slate-400'}`}>
+          <span className={`text-sm font-mono ${isTemp ? tempColor(v) : 'text-muted'}`}>
             {v.toFixed(isTemp ? 0 : 1)}{isTemp ? '°C' : '%'}
           </span>
         )}
@@ -396,9 +396,9 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
         </div>
 
         {/* Algorithm Settings + curve preview */}
-        <div className="border-t border-slate-700 pt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="border-t border-surface-2 pt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
-            <h4 className="font-medium text-slate-200 mb-3">Algorithm Settings</h4>
+            <h4 className="font-medium text-fg-2 mb-3">Algorithm Settings</h4>
             {algorithm === 'linear' && (
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="input-label">Min Temp (°C)</label>
@@ -420,9 +420,9 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
                 {stepParams.steps.map((step, i) => (
                   <div key={i} className="flex gap-2 items-center">
                     <input type="number" className="input w-20" value={step.temp} onChange={(e) => updateStep(i, 'temp', parseFloat(e.target.value) || 0)} />
-                    <span className="text-slate-400">°C →</span>
+                    <span className="text-muted">°C →</span>
                     <input type="number" className="input w-20" value={step.speed} onChange={(e) => updateStep(i, 'speed', parseInt(e.target.value) || 0)} />
-                    <span className="text-slate-400">%</span>
+                    <span className="text-muted">%</span>
                     <Button variant="danger" size="sm" onClick={() => removeStep(i)} disabled={stepParams.steps.length <= 1}>
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -449,7 +449,7 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
             )}
           </div>
           <div>
-            <h4 className="font-medium text-slate-200 mb-3">Curve Preview</h4>
+            <h4 className="font-medium text-fg-2 mb-3">Curve Preview</h4>
             <CurvePreview
               algorithm={algorithm}
               linear={linearParams}
@@ -461,11 +461,11 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
         </div>
 
         {/* Inputs */}
-        <div className="border-t border-slate-700 pt-4">
+        <div className="border-t border-surface-2 pt-4">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="font-medium text-slate-200">Temperature / Load Inputs</h4>
+            <h4 className="font-medium text-fg-2">Temperature / Load Inputs</h4>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-400">Combine:</label>
+              <label className="text-xs text-muted">Combine:</label>
               <select className="select py-1 text-sm w-40" value={inputAggregation} onChange={(e) => setInputAggregation(e.target.value as InputAggregation)}>
                 <option value="or">Max (respond to hottest)</option>
                 <option value="and">Min (all must be cool)</option>
@@ -486,7 +486,7 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
                 ))}
               </InputGroup>
             )}
-            <InputGroup title={`CPUs (${cpuCount})`} icon={Cpu} iconColor="text-blue-400">
+            <InputGroup title={`CPUs (${cpuCount})`} icon={Cpu} iconColor="text-info">
               {Array.from({ length: Math.max(cpuCount, 1) }, (_, i) =>
                 renderCheckbox(INPUT_TYPES[2], i, `CPU ${i}${monitoring?.system?.cpu_packages?.[i]?.name ? ` — ${monitoring.system.cpu_packages[i].name}` : ''}`))}
               {renderCheckbox(INPUT_TYPES[5])}
@@ -509,16 +509,16 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
           {/* Selected inputs + per-input weights */}
           {selectedInputs.length > 0 && (
             <div className="mt-3 space-y-1">
-              <p className="text-xs text-slate-400">Selected inputs{inputAggregation === 'weighted' ? ' (weights used)' : ''}:</p>
+              <p className="text-xs text-muted">Selected inputs{inputAggregation === 'weighted' ? ' (weights used)' : ''}:</p>
               {selectedInputs.map((inp) => (
-                <div key={inputKey(inp)} className="flex items-center justify-between text-sm bg-slate-700/30 rounded px-2 py-1">
-                  <span className="text-slate-300">{inp.input_type}{INPUT_TYPES.find((t) => t.value === inp.input_type)?.needsIndex ? ` #${inp.input_index}` : ''}</span>
+                <div key={inputKey(inp)} className="flex items-center justify-between text-sm bg-surface-2/30 rounded px-2 py-1">
+                  <span className="text-fg-3">{inp.input_type}{INPUT_TYPES.find((t) => t.value === inp.input_type)?.needsIndex ? ` #${inp.input_index}` : ''}</span>
                   <div className="flex items-center gap-2">
-                    <label className="text-xs text-slate-500">weight</label>
+                    <label className="text-xs text-muted-2">weight</label>
                     <input type="number" step="0.5" min="0" className="input w-20 py-1"
                       value={inp.weight} disabled={inputAggregation !== 'weighted'}
                       onChange={(e) => setWeight(inputKey(inp), parseFloat(e.target.value) || 0)} />
-                    <button type="button" className="text-slate-500 hover:text-red-400" onClick={() => toggleInput(inp.input_type, inp.input_index)}>✕</button>
+                    <button type="button" className="text-muted-2 hover:text-danger" onClick={() => toggleInput(inp.input_type, inp.input_index)}>✕</button>
                   </div>
                 </div>
               ))}
@@ -527,34 +527,34 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
         </div>
 
         {/* Zones */}
-        <div className="border-t border-slate-700 pt-4">
-          <h4 className="font-medium text-slate-200 mb-3">Target Zones</h4>
+        <div className="border-t border-surface-2 pt-4">
+          <h4 className="font-medium text-fg-2 mb-3">Target Zones</h4>
           {zones.length > 0 ? (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {zones.map((zone) => (
                   <label key={zone.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
-                    selectedZones.includes(zone.id) ? 'bg-blue-900/50 border border-blue-600' : 'bg-slate-700/50 border border-slate-600 hover:border-slate-500'}`}>
+                    selectedZones.includes(zone.id) ? 'bg-info/15 border border-primary-600' : 'bg-surface-2/50 border border-surface-3 hover:border-muted-2'}`}>
                     <input type="checkbox" checked={selectedZones.includes(zone.id)} className="rounded"
                       onChange={(e) => setSelectedZones(e.target.checked ? [...selectedZones, zone.id] : selectedZones.filter((z) => z !== zone.id))} />
-                    <span className="text-sm text-slate-200">{zone.name}</span>
+                    <span className="text-sm text-fg-2">{zone.name}</span>
                   </label>
                 ))}
               </div>
-              <p className="text-xs text-slate-500 mt-2">
+              <p className="text-xs text-muted-2 mt-2">
                 {selectedZones.length === 0 ? 'No zones selected' : `Controls ${selectedZones.length} zone(s)`}
               </p>
             </>
           ) : (
-            <p className="text-sm text-slate-400">No control zones available. Detect fans first on the Fans page.</p>
+            <p className="text-sm text-muted">No control zones available. Detect fans first on the Fans page.</p>
           )}
         </div>
 
         {/* Advanced tuning */}
-        <div className="border-t border-slate-700 pt-4">
-          <h4 className="font-medium text-slate-200 mb-3">Advanced</h4>
+        <div className="border-t border-surface-2 pt-4">
+          <h4 className="font-medium text-fg-2 mb-3">Advanced</h4>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
-            <label className="flex items-center gap-2 text-sm text-slate-300">
+            <label className="flex items-center gap-2 text-sm text-fg-3">
               <input type="checkbox" checked={smoothTransition} onChange={(e) => setSmoothTransition(e.target.checked)} className="rounded" />
               Smooth transitions
             </label>
@@ -568,8 +568,8 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
         </div>
 
         {/* Actions */}
-        <div className="flex justify-between items-center gap-2 pt-4 border-t border-slate-700 sticky bottom-0 bg-slate-800">
-          <span className="text-sm text-red-400">{validationError}</span>
+        <div className="flex justify-between items-center gap-2 pt-4 border-t border-surface-2 sticky bottom-0 bg-surface">
+          <span className="text-sm text-danger">{validationError}</span>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={onClose}>Cancel</Button>
             <Button onClick={handleSave} isLoading={isLoading} disabled={!!validationError}>
@@ -614,7 +614,7 @@ function CurvePreview({ algorithm, linear, step, pid, currentInput }: {
   }, [algorithm, linear, step, pid]);
 
   return (
-    <div className="h-48 bg-slate-900/40 rounded-lg p-2">
+    <div className="h-48 bg-app/40 rounded-lg p-2">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#334155" />

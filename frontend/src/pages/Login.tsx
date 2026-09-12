@@ -16,7 +16,7 @@ export function Login() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+      <div className="min-h-screen flex items-center justify-center bg-app">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
       </div>
     );
@@ -41,27 +41,27 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-app px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center p-3 bg-primary-600 rounded-xl mb-4">
             <Thermometer className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-100">Fan Control</h1>
-          <p className="text-slate-400 mt-2">Sign in to manage your system fans</p>
+          <h1 className="text-2xl font-bold text-fg">Fan Control</h1>
+          <p className="text-muted mt-2">Sign in to manage your system fans</p>
         </div>
 
-        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+        <div className="bg-surface border border-surface-2 rounded-lg p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="flex items-center gap-2 p-3 bg-red-900/50 border border-red-800 rounded-lg text-red-400">
+              <div className="flex items-center gap-2 p-3 bg-danger/15 border border-danger/30 rounded-lg text-danger">
                 <AlertCircle className="w-5 h-5 flex-shrink-0" />
                 <span className="text-sm">{error}</span>
               </div>
             )}
 
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-slate-300 mb-1">
+              <label htmlFor="username" className="block text-sm font-medium text-fg-3 mb-1">
                 Username
               </label>
               <input
@@ -77,7 +77,7 @@ export function Login() {
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-300 mb-1">
+              <label htmlFor="password" className="block text-sm font-medium text-fg-3 mb-1">
                 Password
               </label>
               <input
@@ -101,7 +101,7 @@ export function Login() {
           </form>
         </div>
 
-        <p className="text-center text-sm text-slate-500 mt-4">
+        <p className="text-center text-sm text-muted-2 mt-4">
           Default credentials: admin / admin
         </p>
       </div>

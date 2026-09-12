@@ -160,7 +160,7 @@ export function Fans() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-100">Fans &amp; Zones</h1>
+        <h1 className="text-2xl font-bold text-fg">Fans &amp; Zones</h1>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={() => refetch()} isLoading={isLoading}>
             <RefreshCw className="w-4 h-4 mr-2" />
@@ -174,28 +174,28 @@ export function Fans() {
       </div>
 
       {actionError && (
-        <div className="p-3 bg-red-900/40 border border-red-800 rounded-lg text-red-300 flex items-center justify-between">
+        <div className="p-3 bg-danger/15 border border-danger/30 rounded-lg text-danger flex items-center justify-between">
           <span>{actionError}</span>
-          <button className="text-red-400 hover:text-red-200" onClick={() => setActionError(null)}>
+          <button className="text-danger hover:text-danger" onClick={() => setActionError(null)}>
             ✕
           </button>
         </div>
       )}
 
       {detectMutation.isSuccess && (
-        <div className="p-3 bg-green-900/50 border border-green-800 rounded-lg text-green-400">
+        <div className="p-3 bg-ok/15 border border-ok/30 rounded-lg text-ok">
           Fan detection completed. Found {(detectMutation.data as unknown[])?.length || 0} fans.
         </div>
       )}
 
       {/* Tab Navigation */}
-      <div className="flex border-b border-slate-700">
+      <div className="flex border-b border-surface-2">
         <button
           onClick={() => setActiveTab('fans')}
           className={`px-4 py-2 font-medium transition-colors ${
             activeTab === 'fans'
-              ? 'text-blue-400 border-b-2 border-blue-400'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'text-info border-b-2 border-info'
+              : 'text-muted hover:text-fg-2'
           }`}
         >
           <Fan className="w-4 h-4 inline mr-2" />
@@ -205,8 +205,8 @@ export function Fans() {
           onClick={() => setActiveTab('zones')}
           className={`px-4 py-2 font-medium transition-colors ${
             activeTab === 'zones'
-              ? 'text-blue-400 border-b-2 border-blue-400'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'text-info border-b-2 border-info'
+              : 'text-muted hover:text-fg-2'
           }`}
         >
           <Layers className="w-4 h-4 inline mr-2" />
@@ -221,8 +221,8 @@ export function Fans() {
             return (
               <div key={zoneId ?? 'unassigned'} className="space-y-3">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold text-slate-200">{zoneName(zoneId)}</h2>
-                  <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">
+                  <h2 className="text-lg font-semibold text-fg-2">{zoneName(zoneId)}</h2>
+                  <span className="text-xs bg-surface-2 text-fg-3 px-2 py-0.5 rounded">
                     {zoneFans.length} fan{zoneFans.length !== 1 ? 's' : ''}
                   </span>
                 </div>
@@ -249,16 +249,16 @@ export function Fans() {
 
           {mergedFans.length === 0 && !isLoading && (
             <div className="text-center py-12">
-              <Fan className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-              <p className="text-slate-400">No fans detected</p>
-              <p className="text-sm text-slate-500 mt-1">Click "Detect Fans" to scan for fan sensors</p>
+              <Fan className="w-12 h-12 text-surface-3 mx-auto mb-4" />
+              <p className="text-muted">No fans detected</p>
+              <p className="text-sm text-muted-2 mt-1">Click "Detect Fans" to scan for fan sensors</p>
             </div>
           )}
         </div>
       ) : (
         <Card title="Zone Naming (advanced)">
           <div className="space-y-4">
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-muted">
               Fans are assigned to control zones directly on the Fans tab. This optional editor
               lets you define named zone groupings used by older profiles.
             </p>
@@ -284,7 +284,7 @@ export function Fans() {
               onChange={(e) => setNewLabel(e.target.value)}
               placeholder="e.g., CPU Cooler, Case Front"
             />
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-muted mt-1">
               A friendly name for this fan. Leave empty to use the sensor ID.
             </p>
           </div>
@@ -319,13 +319,13 @@ export function Fans() {
               aria-label="Fan speed percent"
               aria-valuetext={`${speedValue} percent`}
             />
-            <div className="flex justify-between text-xs text-slate-400 mt-1">
+            <div className="flex justify-between text-xs text-muted mt-1">
               <span>0%</span>
               <span>50%</span>
               <span>100%</span>
             </div>
           </div>
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-muted">
             Sets a manual override for this fan's zone, bypassing profile control until you reset it.
           </p>
           <div className="flex justify-between gap-2">
@@ -376,38 +376,38 @@ function FanCard({ fan, zones, onEditLabel, onIdentify, onSetSpeed, onAssignZone
       <div className="space-y-4">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${isSpinning ? 'bg-green-900/50' : 'bg-slate-700'}`}>
+            <div className={`p-2 rounded-lg ${isSpinning ? 'bg-ok/15' : 'bg-surface-2'}`}>
               <Fan
-                className={`w-6 h-6 ${isSpinning ? 'text-green-400 animate-spin' : 'text-slate-500'}`}
+                className={`w-6 h-6 ${isSpinning ? 'text-ok animate-spin' : 'text-muted-2'}`}
               />
             </div>
             <div>
-              <h3 className="font-semibold text-slate-200">{fan.label || fan.ipmi_sensor_id}</h3>
-              <p className="text-sm text-slate-400">
+              <h3 className="font-semibold text-fg-2">{fan.label || fan.ipmi_sensor_id}</h3>
+              <p className="text-sm text-muted">
                 {fan.ipmi_sensor_id}
-                {fan.channel != null && <span className="ml-1 text-slate-500">· pwm{fan.channel}</span>}
+                {fan.channel != null && <span className="ml-1 text-muted-2">· pwm{fan.channel}</span>}
               </p>
             </div>
           </div>
           {fan.manual_override && (
-            <span className="text-xs bg-yellow-900/50 text-yellow-400 px-2 py-1 rounded">Manual</span>
+            <span className="text-xs bg-warn/15 text-warn px-2 py-1 rounded">Manual</span>
           )}
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-center">
-          <div className="p-3 bg-slate-700/50 rounded-lg">
-            <p className="text-2xl font-bold text-slate-100">{fan.current_rpm || 0}</p>
-            <p className="text-xs text-slate-400">RPM{!connected && ' (idle)'}</p>
+          <div className="p-3 bg-surface-2/50 rounded-lg">
+            <p className="text-2xl font-bold text-fg">{fan.current_rpm || 0}</p>
+            <p className="text-xs text-muted">RPM{!connected && ' (idle)'}</p>
           </div>
-          <div className="p-3 bg-slate-700/50 rounded-lg">
-            <p className="text-2xl font-bold text-slate-100">{fan.current_duty ?? '-'}</p>
-            <p className="text-xs text-slate-400">Duty %</p>
+          <div className="p-3 bg-surface-2/50 rounded-lg">
+            <p className="text-2xl font-bold text-fg">{fan.current_duty ?? '-'}</p>
+            <p className="text-xs text-muted">Duty %</p>
           </div>
         </div>
 
         {/* Zone assignment */}
         <div className="flex items-center gap-2">
-          <label className="text-xs text-slate-400 whitespace-nowrap" htmlFor={`zone-${fan.id}`}>
+          <label className="text-xs text-muted whitespace-nowrap" htmlFor={`zone-${fan.id}`}>
             Control zone
           </label>
           <select

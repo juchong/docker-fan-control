@@ -165,7 +165,7 @@ export function Settings() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-100">Settings</h1>
+        <h1 className="text-2xl font-bold text-fg">Settings</h1>
         <Button onClick={handleSave} isLoading={updateMutation.isPending}>
           <Save className="w-4 h-4 mr-2" />
           Save Changes
@@ -173,14 +173,14 @@ export function Settings() {
       </div>
 
       {updateMutation.isSuccess && (
-        <div className="p-3 bg-green-900/50 border border-green-800 rounded-lg text-green-400">
+        <div className="p-3 bg-ok/15 border border-ok/30 rounded-lg text-ok">
           Settings saved successfully
         </div>
       )}
 
       {actionMsg && (
         <div className={`p-3 rounded-lg flex items-center justify-between ${
-          actionMsg.error ? 'bg-red-900/40 border border-red-800 text-red-300' : 'bg-green-900/50 border border-green-800 text-green-400'}`}>
+          actionMsg.error ? 'bg-danger/15 border border-danger/30 text-danger' : 'bg-ok/15 border border-ok/30 text-ok'}`}>
           <span>{actionMsg.text}</span>
           <button className="opacity-70 hover:opacity-100" onClick={() => setActionMsg(null)}>✕</button>
         </div>
@@ -202,7 +202,7 @@ export function Settings() {
                     checked={formData.ipmi_mode === 'local'}
                     onChange={(e) => handleChange('ipmi_mode', e.target.value)}
                   />
-                  <span className="text-slate-300">Local (/dev/ipmi0)</span>
+                  <span className="text-fg-3">Local (/dev/ipmi0)</span>
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -212,7 +212,7 @@ export function Settings() {
                     checked={formData.ipmi_mode === 'lan'}
                     onChange={(e) => handleChange('ipmi_mode', e.target.value)}
                   />
-                  <span className="text-slate-300">Network (LAN)</span>
+                  <span className="text-fg-3">Network (LAN)</span>
                 </label>
               </div>
             </div>
@@ -265,7 +265,7 @@ export function Settings() {
                 <option value="dell">Dell</option>
                 <option value="supermicro">Supermicro</option>
               </select>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-muted mt-1">
                 Override if auto-detection selects the wrong format
               </p>
             </div>
@@ -282,8 +282,8 @@ export function Settings() {
             {testMutation.data && (
               <div className={`p-3 rounded-lg ${
                 testMutation.data.success
-                  ? 'bg-green-900/50 border border-green-800 text-green-400'
-                  : 'bg-red-900/50 border border-red-800 text-red-400'
+                  ? 'bg-ok/15 border border-ok/30 text-ok'
+                  : 'bg-danger/15 border border-danger/30 text-danger'
               }`}>
                 {testMutation.data.success ? (
                   <div className="flex items-center gap-2">
@@ -307,7 +307,7 @@ export function Settings() {
           <div className="space-y-4">
             <div>
               <label className="input-label">Detected Motherboard</label>
-              <div className="text-slate-300">
+              <div className="text-fg-3">
                 {settings?.motherboard_vendor && settings?.motherboard_model
                   ? `${settings.motherboard_vendor} ${settings.motherboard_model}`
                   : 'Not detected'}
@@ -326,7 +326,7 @@ export function Settings() {
                   <option key={v} value={v}>{v}</option>
                 ))}
               </select>
-              <p className="text-xs text-slate-400 mt-1">Force a specific driver, then Save to apply.</p>
+              <p className="text-xs text-muted mt-1">Force a specific driver, then Save to apply.</p>
             </div>
 
             <Button
@@ -341,8 +341,8 @@ export function Settings() {
             {detectMutation.data && (
               <div className={`p-3 rounded-lg ${
                 detectMutation.data.success
-                  ? 'bg-green-900/50 border border-green-800 text-green-400'
-                  : 'bg-red-900/50 border border-red-800 text-red-400'
+                  ? 'bg-ok/15 border border-ok/30 text-ok'
+                  : 'bg-danger/15 border border-danger/30 text-danger'
               }`}>
                 {detectMutation.data.success && detectMutation.data.driver ? (
                   <div>
@@ -368,42 +368,42 @@ export function Settings() {
         {/* Available Drivers */}
         <Card title="Available Drivers">
           <div className="space-y-4">
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-muted">
               Supported motherboard vendors and their capabilities:
             </p>
 
             {driversQuery.data?.map((driver) => (
-              <div key={`${driver.vendor}-${driver.model}`} className="border border-slate-700 rounded-lg p-3">
+              <div key={`${driver.vendor}-${driver.model}`} className="border border-surface-2 rounded-lg p-3">
                 <div className="flex justify-between items-start mb-2">
                   <div>
-                    <div className="font-semibold text-slate-200">{driver.vendor}</div>
-                    <div className="text-sm text-slate-400">{driver.model}</div>
+                    <div className="font-semibold text-fg-2">{driver.vendor}</div>
+                    <div className="text-sm text-muted">{driver.model}</div>
                   </div>
-                  <span className="text-xs bg-slate-600 px-2 py-1 rounded">
+                  <span className="text-xs bg-surface-3 px-2 py-1 rounded">
                     {driver.capabilities.max_zones} zones, {driver.capabilities.max_fans} fans
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-slate-400">Manual Mode: </span>
+                    <span className="text-muted">Manual Mode: </span>
                     <span>{driver.capabilities.supports_manual_mode ? '✓' : '✗'}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400">Duty Cycle: </span>
+                    <span className="text-muted">Duty Cycle: </span>
                     <span>{driver.capabilities.supports_duty_cycle_reading ? '✓' : '✗'}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400">Per-Zone: </span>
+                    <span className="text-muted">Per-Zone: </span>
                     <span>{driver.capabilities.supports_per_zone_control ? '✓' : '✗'}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400">Static RPM: </span>
+                    <span className="text-muted">Static RPM: </span>
                     <span>{driver.capabilities.has_static_rpm_values ? '✓' : '✗'}</span>
                   </div>
                 </div>
 
-                <div className="mt-2 text-xs text-slate-400">
+                <div className="mt-2 text-xs text-muted">
                   <strong>Default Zones:</strong> {driver.zone_layout.zones.map(zone => zone.name).join(', ')}
                 </div>
               </div>
@@ -516,18 +516,18 @@ export function Settings() {
                 />
               </div>
             </div>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-muted">
               When any temperature exceeds the emergency threshold, all fans will be set to the emergency speed.
             </p>
 
-            <div className="border-t border-slate-700 pt-4">
+            <div className="border-t border-surface-2 pt-4">
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={formData.warning_enabled ?? true}
                   onChange={(e) => handleChange('warning_enabled', e.target.checked)}
                 />
-                <span className="text-slate-300">Log warnings when temperature exceeds:</span>
+                <span className="text-fg-3">Log warnings when temperature exceeds:</span>
               </label>
               <input
                 type="number"
@@ -538,16 +538,16 @@ export function Settings() {
               />
             </div>
 
-            <div className="border-t border-slate-700 pt-4">
+            <div className="border-t border-surface-2 pt-4">
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={formData.safety_on_shutdown ?? true}
                   onChange={(e) => handleChange('safety_on_shutdown', e.target.checked)}
                 />
-                <span className="text-slate-300">Set fans to 100% on shutdown</span>
+                <span className="text-fg-3">Set fans to 100% on shutdown</span>
               </label>
-              <p className="text-sm text-slate-400 mt-1">
+              <p className="text-sm text-muted mt-1">
                 When enabled, fans will be set to maximum speed when the controller stops.
               </p>
             </div>
@@ -557,8 +557,8 @@ export function Settings() {
         {/* Account */}
         <Card title="Account">
           <div className="space-y-3">
-            <p className="text-sm text-slate-400">
-              Signed in as <span className="text-slate-200">{user?.username}</span> ({user?.role}).
+            <p className="text-sm text-muted">
+              Signed in as <span className="text-fg-2">{user?.username}</span> ({user?.role}).
             </p>
             <Button variant="secondary" onClick={() => setIsChangingPassword(true)}>
               <KeyRound className="w-4 h-4 mr-2" />
@@ -582,11 +582,11 @@ export function Settings() {
               {(users as User[] || []).map((u) => (
                 <div
                   key={u.id}
-                  className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg"
+                  className="flex items-center justify-between p-3 bg-surface-2/50 rounded-lg"
                 >
                   <div>
-                    <p className="font-medium text-slate-200">{u.username}</p>
-                    <p className="text-sm text-slate-400">
+                    <p className="font-medium text-fg-2">{u.username}</p>
+                    <p className="text-sm text-muted">
                       {u.role} • Last login: {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never'}
                     </p>
                   </div>
@@ -651,14 +651,14 @@ function ChangePasswordModal({ isOpen, onClose, onSave, isLoading }: {
         <div>
           <label className="input-label">New password</label>
           <input type="password" className="input" value={next} onChange={(e) => setNext(e.target.value)} />
-          <p className="text-xs text-slate-500 mt-1">At least 8 chars with upper, lower, digit, and a symbol.</p>
+          <p className="text-xs text-muted-2 mt-1">At least 8 chars with upper, lower, digit, and a symbol.</p>
         </div>
         <div>
           <label className="input-label">Confirm new password</label>
           <input type="password" className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
         </div>
         {(mismatch || weak) && (
-          <p className="text-sm text-red-400">{mismatch ? 'Passwords do not match' : 'Password is too short'}</p>
+          <p className="text-sm text-danger">{mismatch ? 'Passwords do not match' : 'Password is too short'}</p>
         )}
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>Cancel</Button>

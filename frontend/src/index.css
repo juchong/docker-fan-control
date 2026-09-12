@@ -2,17 +2,66 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Theme tokens. Each value is an "R G B" channel triple consumed by Tailwind
+ * via rgb(var(--token) / <alpha-value>) (see tailwind.config.js), which keeps
+ * opacity modifiers working. The :root block is the dark theme (default) and
+ * its values are identical to the original slate palette, so dark mode is
+ * unchanged. The light overrides apply when <html data-theme="light">.
+ */
 :root {
-  --color-bg: #0f172a;
-  --color-surface: #1e293b;
-  --color-surface-hover: #334155;
-  --color-border: #334155;
-  --color-text: #f1f5f9;
-  --color-text-muted: #94a3b8;
+  /* Surfaces (slate-900 / 800 / 700 / 600) */
+  --c-app: 15 23 42;
+  --c-surface: 30 41 59;
+  --c-surface-2: 51 65 85;
+  --c-surface-3: 71 85 105;
+
+  /* Lines (slate-700 / 600) */
+  --c-line: 51 65 85;
+  --c-line-strong: 71 85 105;
+
+  /* Typography (slate-100 / 200 / 300) + muted (slate-400 / 500) */
+  --c-fg: 241 245 249;
+  --c-fg-2: 226 232 240;
+  --c-fg-3: 203 213 225;
+  --c-muted: 148 163 184;
+  --c-muted-2: 100 116 139;
+
+  /* Status (green-400 / amber-400 / red-400 / blue-400) */
+  --c-ok: 74 222 128;
+  --c-warn: 250 204 21;
+  --c-danger: 248 113 113;
+  --c-info: 96 165 250;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --c-app: 241 245 249;        /* slate-100 */
+  --c-surface: 255 255 255;    /* white */
+  --c-surface-2: 226 232 240;  /* slate-200 */
+  --c-surface-3: 203 213 225;  /* slate-300 */
+
+  --c-line: 226 232 240;       /* slate-200 */
+  --c-line-strong: 203 213 225;/* slate-300 */
+
+  --c-fg: 15 23 42;            /* slate-900 */
+  --c-fg-2: 30 41 59;          /* slate-800 */
+  --c-fg-3: 51 65 85;          /* slate-700 */
+  --c-muted: 100 116 139;      /* slate-500 */
+  --c-muted-2: 148 163 184;    /* slate-400 */
+
+  /* Darker status tones read better on light surfaces */
+  --c-ok: 22 163 74;           /* green-600 */
+  --c-warn: 202 138 4;         /* yellow-600 */
+  --c-danger: 220 38 38;       /* red-600 */
+  --c-info: 37 99 235;         /* blue-600 */
+
+  color-scheme: light;
 }
 
 body {
-  @apply bg-slate-900 text-slate-100 antialiased;
+  @apply bg-app text-fg antialiased;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -23,29 +72,29 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-slate-800;
+  @apply bg-surface;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-slate-600 rounded;
+  @apply bg-surface-3 rounded;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-slate-500;
+  @apply bg-muted-2;
 }
 
 /* Card styles */
 .card {
-  @apply bg-slate-800 border border-slate-700 rounded-lg p-4;
+  @apply bg-surface border border-line rounded-lg p-4;
 }
 
 .card-header {
-  @apply text-lg font-semibold text-slate-200 mb-4;
+  @apply text-lg font-semibold text-fg-2 mb-4;
 }
 
 /* Button styles */
 .btn {
-  @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900;
+  @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-app;
 }
 
 .btn-primary {
@@ -53,11 +102,11 @@ body {
 }
 
 .btn-secondary {
-  @apply bg-slate-700 hover:bg-slate-600 text-slate-200 focus:ring-slate-500;
+  @apply bg-surface-2 hover:bg-surface-3 text-fg-2 focus:ring-muted-2;
 }
 
 .btn-danger {
-  @apply bg-red-600 hover:bg-red-700 text-white focus:ring-red-500;
+  @apply bg-danger hover:brightness-110 text-white focus:ring-danger;
 }
 
 .btn-sm {
@@ -66,16 +115,16 @@ body {
 
 /* Input styles */
 .input {
-  @apply w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  @apply w-full px-3 py-2 bg-surface-2 border border-line-strong rounded-lg text-fg-2 placeholder-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
 }
 
 .input-label {
-  @apply block text-sm font-medium text-slate-300 mb-1;
+  @apply block text-sm font-medium text-fg-3 mb-1;
 }
 
 /* Select styles */
 .select {
-  @apply w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  @apply w-full px-3 py-2 bg-surface-2 border border-line-strong rounded-lg text-fg-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
 }
 
 /* Table styles */
@@ -84,15 +133,15 @@ body {
 }
 
 .table th {
-  @apply px-4 py-3 text-sm font-medium text-slate-400 uppercase tracking-wider bg-slate-800/50;
+  @apply px-4 py-3 text-sm font-medium text-muted uppercase tracking-wider bg-surface/50;
 }
 
 .table td {
-  @apply px-4 py-3 text-sm text-slate-300 border-t border-slate-700;
+  @apply px-4 py-3 text-sm text-fg-3 border-t border-line;
 }
 
 .table tr:hover td {
-  @apply bg-slate-800/50;
+  @apply bg-surface/50;
 }
 
 /* Badge styles */
@@ -101,36 +150,36 @@ body {
 }
 
 .badge-success {
-  @apply bg-green-900/50 text-green-400;
+  @apply bg-ok/15 text-ok;
 }
 
 .badge-warning {
-  @apply bg-yellow-900/50 text-yellow-400;
+  @apply bg-warn/15 text-warn;
 }
 
 .badge-error {
-  @apply bg-red-900/50 text-red-400;
+  @apply bg-danger/15 text-danger;
 }
 
 .badge-info {
-  @apply bg-blue-900/50 text-blue-400;
+  @apply bg-info/15 text-info;
 }
 
 /* Temperature colors */
 .temp-cold {
-  @apply text-blue-400;
+  @apply text-info;
 }
 
 .temp-normal {
-  @apply text-green-400;
+  @apply text-ok;
 }
 
 .temp-warm {
-  @apply text-yellow-400;
+  @apply text-warn;
 }
 
 .temp-hot {
-  @apply text-red-400;
+  @apply text-danger;
 }
 
 /* Gauge animation */
@@ -162,5 +211,17 @@ body {
 
 /* Skeleton loading */
 .skeleton {
-  @apply bg-slate-700 animate-pulse rounded;
+  @apply bg-surface-2 animate-pulse rounded;
+}
+
+/* Respect users who prefer less motion: disable non-essential animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

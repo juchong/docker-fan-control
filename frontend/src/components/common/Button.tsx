@@ -17,12 +17,12 @@ export function Button({
   disabled,
   ...props
 }: ButtonProps) {
-  const baseStyles = 'inline-flex items-center justify-center font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed';
+  const baseStyles = 'inline-flex items-center justify-center font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-app disabled:opacity-50 disabled:cursor-not-allowed';
   
   const variantStyles = {
     primary: 'bg-primary-600 hover:bg-primary-700 text-white focus:ring-primary-500',
-    secondary: 'bg-slate-700 hover:bg-slate-600 text-slate-200 focus:ring-slate-500',
-    danger: 'bg-red-600 hover:bg-red-700 text-white focus:ring-red-500',
+    secondary: 'bg-surface-2 hover:bg-surface-3 text-fg-2 focus:ring-muted-2',
+    danger: 'bg-danger hover:bg-danger text-white focus:ring-danger',
   };
   
   const sizeStyles = {
