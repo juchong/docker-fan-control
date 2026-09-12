@@ -8,6 +8,7 @@ import { useMonitoring } from '../hooks/useMonitoring';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
+import { useToast } from '../components/common/Toast';
 import {
   ProfileSummary, Profile, ProfileInput, LinearParams, StepParams, PIDParams,
   AlgorithmParams, InputAggregation,
@@ -34,6 +35,7 @@ function useDriverZones(): ZoneOption[] {
 
 export function Profiles() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [isCreating, setIsCreating] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,22 +47,41 @@ export function Profiles() {
     queryFn: profilesApi.list,
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['profiles'] });
-  const onErr = (e: Error) => setError(e.message);
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['profiles'] });
+    // The controller's active-profile set can change — refresh live state too.
+    queryClient.invalidateQueries({ queryKey: ['monitoring'] });
+  };
+  const onErr = (e: Error) => {
+    setError(e.message);
+    toast.error(e.message);
+  };
 
   const createMutation = useMutation({
     mutationFn: profilesApi.create,
-    onSuccess: () => { invalidate(); setIsCreating(false); },
+    onSuccess: () => { invalidate(); setIsCreating(false); toast.success('Profile created'); },
     onError: onErr,
   });
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: unknown }) => profilesApi.update(id, data),
-    onSuccess: () => { invalidate(); setEditingProfile(null); },
+    onSuccess: () => { invalidate(); setEditingProfile(null); toast.success('Profile saved'); },
     onError: onErr,
   });
-  const deleteMutation = useMutation({ mutationFn: profilesApi.delete, onSuccess: invalidate, onError: onErr });
-  const activateMutation = useMutation({ mutationFn: profilesApi.activate, onSuccess: invalidate, onError: onErr });
-  const deactivateMutation = useMutation({ mutationFn: profilesApi.deactivate, onSuccess: invalidate, onError: onErr });
+  const deleteMutation = useMutation({
+    mutationFn: profilesApi.delete,
+    onSuccess: () => { invalidate(); toast.success('Profile deleted'); },
+    onError: onErr,
+  });
+  const activateMutation = useMutation({
+    mutationFn: profilesApi.activate,
+    onSuccess: () => { invalidate(); toast.success('Profile activated'); },
+    onError: onErr,
+  });
+  const deactivateMutation = useMutation({
+    mutationFn: profilesApi.deactivate,
+    onSuccess: () => { invalidate(); toast.info('Profile deactivated'); },
+    onError: onErr,
+  });
 
   const handleEdit = async (profileId: number) => {
     try {

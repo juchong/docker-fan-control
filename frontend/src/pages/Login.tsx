@@ -51,11 +51,11 @@ export function Login() {
           <p className="text-muted mt-2">Sign in to manage your system fans</p>
         </div>
 
-        <div className="bg-surface border border-surface-2 rounded-lg p-6">
+        <div className="bg-surface border border-line rounded-lg p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="flex items-center gap-2 p-3 bg-danger/15 border border-danger/30 rounded-lg text-danger">
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <div role="alert" className="flex items-center gap-2 p-3 bg-danger/15 border border-danger/30 rounded-lg text-danger">
+                <AlertCircle className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
                 <span className="text-sm">{error}</span>
               </div>
             )}
@@ -71,6 +71,7 @@ export function Login() {
                 onChange={(e) => setUsername(e.target.value)}
                 className="input"
                 placeholder="Enter your username"
+                autoComplete="username"
                 required
                 autoFocus
               />
@@ -87,6 +88,7 @@ export function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="input"
                 placeholder="Enter your password"
+                autoComplete="current-password"
                 required
               />
             </div>
@@ -100,10 +102,6 @@ export function Login() {
             </Button>
           </form>
         </div>
-
-        <p className="text-center text-sm text-muted-2 mt-4">
-          Default credentials: admin / admin
-        </p>
       </div>
     </div>
   );

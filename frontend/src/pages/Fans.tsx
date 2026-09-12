@@ -5,6 +5,7 @@ import { useMonitoring } from '../hooks/useMonitoring';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
+import { useToast } from '../components/common/Toast';
 import { ZoneLayoutEditor } from '../components/zones/ZoneLayoutEditor';
 import { ZoneLayout } from '../types/zone';
 import { FanStatus } from '../types/fan';
@@ -27,13 +28,13 @@ interface ZoneOption {
 
 export function Fans() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const { data: monitoring } = useMonitoring();
   const [speedFan, setSpeedFan] = useState<FanStatus | null>(null);
   const [speedValue, setSpeedValue] = useState(50);
   const [editingFanLabel, setEditingFanLabel] = useState<FanStatus | null>(null);
   const [newLabel, setNewLabel] = useState('');
   const [activeTab, setActiveTab] = useState<'fans' | 'zones'>('fans');
-  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: fans, isLoading, refetch } = useQuery({
     queryKey: ['fans'],
@@ -55,8 +56,11 @@ export function Fans() {
 
   const detectMutation = useMutation({
     mutationFn: fansApi.detect,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fans'] }),
-    onError: (e: Error) => setActionError(e.message),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['fans'] });
+      toast.success(`Fan detection complete — found ${(data as unknown[])?.length ?? 0} fans.`);
+    },
+    onError: (e: Error) => toast.error(`Fan detection failed: ${e.message}`),
   });
 
   const updateFanMutation = useMutation({
@@ -65,29 +69,35 @@ export function Fans() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fans'] });
       setEditingFanLabel(null);
+      toast.success('Fan updated');
     },
-    onError: (e: Error) => setActionError(e.message),
+    onError: (e: Error) => toast.error(`Could not update fan: ${e.message}`),
   });
 
   const updateSettingsMutation = useMutation({
     mutationFn: settingsApi.update,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
-    onError: (e: Error) => setActionError(e.message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      toast.success('Zone layout saved');
+    },
+    onError: (e: Error) => toast.error(`Could not save zone layout: ${e.message}`),
   });
 
   const identifyMutation = useMutation({
     mutationFn: (id: number) => fansApi.identify(id, 5),
-    onError: (e: Error) => setActionError(e.message),
+    onSuccess: () => toast.info('Identifying fan — it will spin up for a few seconds.'),
+    onError: (e: Error) => toast.error(`Identify failed: ${e.message}`),
   });
 
   const setSpeedMutation = useMutation({
     mutationFn: ({ id, percent }: { id: number; percent: number }) =>
       fansApi.setSpeed(id, percent),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       setSpeedFan(null);
       queryClient.invalidateQueries({ queryKey: ['fans'] });
+      toast.success(`Manual override set to ${vars.percent}%`);
     },
-    onError: (e: Error) => setActionError(e.message),
+    onError: (e: Error) => toast.error(`Could not set speed: ${e.message}`),
   });
 
   const clearSpeedMutation = useMutation({
@@ -95,8 +105,9 @@ export function Fans() {
     onSuccess: () => {
       setSpeedFan(null);
       queryClient.invalidateQueries({ queryKey: ['fans'] });
+      toast.success('Returned to automatic control');
     },
-    onError: (e: Error) => setActionError(e.message),
+    onError: (e: Error) => toast.error(`Could not reset to auto: ${e.message}`),
   });
 
   // Merge static fan data with real-time monitoring data.
@@ -172,21 +183,6 @@ export function Fans() {
           </Button>
         </div>
       </div>
-
-      {actionError && (
-        <div className="p-3 bg-danger/15 border border-danger/30 rounded-lg text-danger flex items-center justify-between">
-          <span>{actionError}</span>
-          <button className="text-danger hover:text-danger" onClick={() => setActionError(null)}>
-            ✕
-          </button>
-        </div>
-      )}
-
-      {detectMutation.isSuccess && (
-        <div className="p-3 bg-ok/15 border border-ok/30 rounded-lg text-ok">
-          Fan detection completed. Found {(detectMutation.data as unknown[])?.length || 0} fans.
-        </div>
-      )}
 
       {/* Tab Navigation */}
       <div className="flex border-b border-surface-2">
