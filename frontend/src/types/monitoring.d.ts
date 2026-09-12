@@ -16,6 +16,7 @@ export interface GPUMetrics {
 export interface CPUPackageMetrics {
   index: number;
   name: string;
+  model?: string;
   temperature: number;
 }
 

@@ -177,7 +177,8 @@ type BoardTempMetrics struct {
 // CPUPackageMetrics represents metrics for a single CPU package/socket
 type CPUPackageMetrics struct {
 	Index       int     `json:"index"`
-	Name        string  `json:"name"`        // e.g., "Package id 0", "Tctl"
+	Name        string  `json:"name"`        // sensor label, e.g., "Package id 0", "Tctl"
+	Model       string  `json:"model"`       // marketing name, e.g., "AMD Ryzen 9 9950X"
 	Temperature float64 `json:"temperature"` // Celsius
 }
 

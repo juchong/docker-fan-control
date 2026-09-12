@@ -6,6 +6,7 @@ import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../components/common/Toast';
+import { useFanHealth, FanState } from '../hooks/useFanHealth';
 import { ZoneLayoutEditor } from '../components/zones/ZoneLayoutEditor';
 import { ZoneLayout } from '../types/zone';
 import { FanStatus } from '../types/fan';
@@ -19,6 +20,7 @@ import {
   RefreshCw,
   Layers,
   RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface ZoneOption {
@@ -29,6 +31,7 @@ interface ZoneOption {
 export function Fans() {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const fanHealth = useFanHealth();
   const { data: monitoring } = useMonitoring();
   const [speedFan, setSpeedFan] = useState<FanStatus | null>(null);
   const [speedValue, setSpeedValue] = useState(50);
@@ -209,6 +212,7 @@ export function Fans() {
                   key={fan.id}
                   fan={fan}
                   zones={zones}
+                  state={fanHealth(fan)}
                   onEditLabel={() => {
                     setEditingFanLabel(fan);
                     setNewLabel(fan.label || '');
@@ -358,6 +362,7 @@ export function Fans() {
 interface FanCardProps {
   fan: FanStatus;
   zones: ZoneOption[];
+  state: FanState;
   onEditLabel: () => void;
   onIdentify: () => void;
   onSetSpeed: () => void;
@@ -365,19 +370,32 @@ interface FanCardProps {
   isIdentifying: boolean;
 }
 
-function FanCard({ fan, zones, onEditLabel, onIdentify, onSetSpeed, onAssignZone, isIdentifying }: FanCardProps) {
-  const isSpinning = fan.current_rpm > 0;
-  const connected = fan.current_rpm > 0 || (fan.current_duty ?? 0) > 0;
+function FanCard({ fan, zones, state, onEditLabel, onIdentify, onSetSpeed, onAssignZone, isIdentifying }: FanCardProps) {
+  const isRunning = state === 'running';
+  const isFailed = state === 'failed';
+  const isIdle = state === 'idle';
+
+  const cardCls = isFailed
+    ? 'ring-2 ring-danger bg-danger/5'
+    : isIdle
+      ? 'opacity-70'
+      : '';
 
   return (
-    <Card>
+    <Card className={cardCls}>
       <div className="space-y-4">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${isSpinning ? 'bg-ok/15' : 'bg-surface-2'}`}>
-              <Fan
-                className={`w-6 h-6 ${isSpinning ? 'text-ok animate-spin' : 'text-muted-2'}`}
-              />
+            <div
+              className={`p-2 rounded-lg ${
+                isFailed ? 'bg-danger/15' : isRunning ? 'bg-ok/15' : 'bg-surface-2'
+              }`}
+            >
+              {isFailed ? (
+                <AlertTriangle className="w-6 h-6 text-danger" />
+              ) : (
+                <Fan className={`w-6 h-6 ${isRunning ? 'text-ok animate-spin' : 'text-muted-2'}`} />
+              )}
             </div>
             <div>
               <h3 className="font-semibold text-fg-2">{fan.label || fan.ipmi_sensor_id}</h3>
@@ -387,15 +405,24 @@ function FanCard({ fan, zones, onEditLabel, onIdentify, onSetSpeed, onAssignZone
               </p>
             </div>
           </div>
-          {fan.manual_override && (
-            <span className="text-xs bg-warn/15 text-warn px-2 py-1 rounded">Manual</span>
-          )}
+          <div className="flex flex-col items-end gap-1">
+            {isFailed && (
+              <span className="text-xs bg-danger/15 text-danger px-2 py-1 rounded inline-flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" /> No RPM
+              </span>
+            )}
+            {fan.manual_override && (
+              <span className="text-xs bg-warn/15 text-warn px-2 py-1 rounded">Manual</span>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-center">
           <div className="p-3 bg-surface-2/50 rounded-lg">
-            <p className="text-2xl font-bold text-fg">{fan.current_rpm || 0}</p>
-            <p className="text-xs text-muted">RPM{!connected && ' (idle)'}</p>
+            <p className={`text-2xl font-bold ${isFailed ? 'text-danger' : 'text-fg'}`}>{fan.current_rpm || 0}</p>
+            <p className={`text-xs ${isFailed ? 'text-danger' : 'text-muted'}`}>
+              RPM{isIdle ? ' (idle)' : ''}{isFailed ? ' (failed?)' : ''}
+            </p>
           </div>
           <div className="p-3 bg-surface-2/50 rounded-lg">
             <p className="text-2xl font-bold text-fg">{fan.current_duty ?? '-'}</p>

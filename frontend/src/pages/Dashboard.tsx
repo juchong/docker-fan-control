@@ -2,6 +2,7 @@ import { useState, lazy, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMonitoring } from '../hooks/useMonitoring';
 import { useMetricsHistory } from '../hooks/useMetricsHistory';
+import { useFanHealth } from '../hooks/useFanHealth';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { RadialGauge } from '../components/viz/RadialGauge';
@@ -155,6 +156,7 @@ function CollapsibleSection({
 export function Dashboard() {
   const { data: monitoring } = useMonitoring();
   const history = useMetricsHistory();
+  const fanHealth = useFanHealth();
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -277,41 +279,57 @@ export function Dashboard() {
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
             {[...monitoring.fans]
               .sort((a, b) => (a.ipmi_zone ?? Infinity) - (b.ipmi_zone ?? Infinity))
-              .map((fan) => (
-                <div
-                  key={fan.id}
-                  className="flex flex-col items-center p-3 bg-surface-2/50 rounded-lg"
-                >
-                  <RadialGauge
-                    value={fan.current_duty ?? 0}
-                    tone={dutyTone(fan.current_duty ?? 0)}
-                    size={104}
-                  />
-                  <span
-                    className="mt-2 text-sm font-medium text-fg-2 text-center truncate w-full"
-                    title={fan.label}
-                  >
-                    {fan.label}
-                  </span>
-                  <span className="text-xs text-muted tabular-nums">{fan.current_rpm} RPM</span>
-                  <span className="mt-1 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-2">
-                    {fan.ipmi_zone == null ? (
-                      <>
-                        <AlertTriangle className="w-3 h-3 text-warn" />
-                        Unassigned
-                      </>
+              .map((fan) => {
+                const state = fanHealth(fan);
+                const cardCls =
+                  state === 'failed'
+                    ? 'border border-danger bg-danger/10'
+                    : state === 'idle'
+                      ? 'bg-surface-2/50 opacity-60'
+                      : 'bg-surface-2/50';
+                return (
+                  <div key={fan.id} className={`flex flex-col items-center p-3 rounded-lg ${cardCls}`}>
+                    <RadialGauge
+                      value={fan.current_duty ?? 0}
+                      tone={state === 'failed' ? 'danger' : dutyTone(fan.current_duty ?? 0)}
+                      size={104}
+                    />
+                    <span
+                      className="mt-2 text-sm font-medium text-fg-2 text-center truncate w-full"
+                      title={fan.label}
+                    >
+                      {fan.label}
+                    </span>
+                    {state === 'failed' ? (
+                      <span className="text-xs font-semibold text-danger tabular-nums inline-flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> No RPM
+                      </span>
                     ) : (
-                      <>
-                        <Layers className="w-3 h-3" />
-                        Zone {fan.ipmi_zone}
-                      </>
+                      <span
+                        className={`text-xs tabular-nums ${state === 'idle' ? 'text-muted-2' : 'text-muted'}`}
+                      >
+                        {fan.current_rpm} RPM{state === 'idle' ? ' · idle' : ''}
+                      </span>
                     )}
-                  </span>
-                  {fan.manual_override && (
-                    <span className="mt-0.5 text-[10px] uppercase tracking-wide text-warn">Manual</span>
-                  )}
-                </div>
-              ))}
+                    <span className="mt-1 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-2">
+                      {fan.ipmi_zone == null ? (
+                        <>
+                          <AlertTriangle className="w-3 h-3 text-warn" />
+                          Unassigned
+                        </>
+                      ) : (
+                        <>
+                          <Layers className="w-3 h-3" />
+                          Zone {fan.ipmi_zone}
+                        </>
+                      )}
+                    </span>
+                    {fan.manual_override && (
+                      <span className="mt-0.5 text-[10px] uppercase tracking-wide text-warn">Manual</span>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         ) : (
           <p className="text-muted text-center py-4">No fans detected</p>
@@ -360,9 +378,13 @@ export function Dashboard() {
             >
               {monitoring.system.cpu_packages.map((cpu) => (
                 <div key={cpu.index} className="flex items-center justify-between p-3 bg-surface-2/50 rounded-lg">
-                  <div>
-                    <p className="font-medium text-fg-2">{cpu.name}</p>
-                    <p className="text-sm text-muted">CPU {cpu.index}</p>
+                  <div className="min-w-0">
+                    <p className="font-medium text-fg-2 truncate" title={cpu.model || cpu.name}>
+                      {cpu.model || cpu.name}
+                    </p>
+                    <p className="text-sm text-muted">
+                      {cpu.model ? cpu.name : `CPU ${cpu.index}`}
+                    </p>
                   </div>
                   <p className={`text-xl font-bold ${tempTextClass(cpu.temperature)}`}>{cpu.temperature.toFixed(0)}°C</p>
                 </div>

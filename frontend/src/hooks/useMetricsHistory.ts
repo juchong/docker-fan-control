@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useMonitoring } from './useMonitoring';
 import { Monitoring } from '../types/monitoring';
 
 export interface MetricSample {
@@ -75,17 +74,9 @@ export function recordSample(m: Monitoring | null) {
   listeners.forEach((l) => l());
 }
 
-// Drives the ring buffer from the shared monitoring feed. Mount this ONCE high
-// in the authenticated app shell so history keeps accruing on every page — not
-// only while the dashboard chart is on screen.
-export function useMetricsRecorder() {
-  const { data } = useMonitoring();
-  useEffect(() => {
-    recordSample(data);
-  }, [data]);
-}
-
-// Read-only subscription to the accumulated history.
+// Read-only subscription to the accumulated history. Recording is driven from
+// the app shell (see LiveRecorder in DashboardLayout) so history accrues on
+// every page, not only while this chart is mounted.
 export function useMetricsHistory(): MetricSample[] {
   const [snapshot, setSnapshot] = useState<MetricSample[]>(buffer);
 

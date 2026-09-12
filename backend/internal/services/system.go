@@ -144,10 +144,45 @@ func (s *SystemService) GetBoardTemperatures() []models.BoardTempMetrics {
 	return temps
 }
 
+// cpuModelName caches the marketing CPU name (e.g., "AMD Ryzen 9 9950X"), which
+// is stable for the life of the process.
+var (
+	cpuModelOnce sync.Once
+	cpuModelName string
+)
+
+// getCPUModelName returns the CPU's marketing model name via gopsutil, falling
+// back to /proc/cpuinfo. Empty if it can't be determined.
+func getCPUModelName() string {
+	cpuModelOnce.Do(func() {
+		if infos, err := cpu.Info(); err == nil {
+			for _, info := range infos {
+				if m := strings.TrimSpace(info.ModelName); m != "" {
+					cpuModelName = m
+					return
+				}
+			}
+		}
+		// Fallback: parse /proc/cpuinfo directly.
+		if data, err := os.ReadFile("/proc/cpuinfo"); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(line, "model name") {
+					if idx := strings.Index(line, ":"); idx >= 0 {
+						cpuModelName = strings.TrimSpace(line[idx+1:])
+						return
+					}
+				}
+			}
+		}
+	})
+	return cpuModelName
+}
+
 // GetCPUPackageTemperatures returns temperature readings for all CPU packages
 func (s *SystemService) GetCPUPackageTemperatures() []models.CPUPackageMetrics {
 	var packages []models.CPUPackageMetrics
 	packageIndex := 0
+	cpuModel := getCPUModelName()
 
 	// Scan hwmon for CPU temperature sensors
 	hwmonPaths, _ := filepath.Glob("/sys/class/hwmon/hwmon*/name")
@@ -205,6 +240,7 @@ func (s *SystemService) GetCPUPackageTemperatures() []models.CPUPackageMetrics {
 					packages = append(packages, models.CPUPackageMetrics{
 						Index:       packageIndex,
 						Name:        displayName,
+						Model:       cpuModel,
 						Temperature: temp,
 					})
 					packageIndex++
@@ -239,6 +275,7 @@ func (s *SystemService) GetCPUPackageTemperatures() []models.CPUPackageMetrics {
 				packages = append(packages, models.CPUPackageMetrics{
 					Index:       i,
 					Name:        zoneName,
+					Model:       cpuModel,
 					Temperature: temp,
 				})
 			}
