@@ -2,26 +2,36 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { settingsApi, authApi } from '../services/api';
 import { useAuthContext } from '../components/auth/AuthProvider';
+import { useMonitoring } from '../hooks/useMonitoring';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { AppSettings, UpdateSettingsRequest } from '../types/settings';
 import { User } from '../types/auth';
-import {  
-  Save, 
+import {
+  Save,
   TestTube,
   Play,
   Square,
   Plus,
   Trash2,
   CheckCircle,
-  XCircle
+  XCircle,
+  KeyRound,
 } from 'lucide-react';
 
 export function Settings() {
   const queryClient = useQueryClient();
   const { user } = useAuthContext();
+  const { data: monitoring } = useMonitoring();
   const [isAddingUser, setIsAddingUser] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [actionMsg, setActionMsg] = useState<{ text: string; error?: boolean } | null>(null);
+
+  // The IPMI connection controls only apply to BMC drivers; hide them on the
+  // direct-sysfs (Hwmon) path where "Test Connection" always fails.
+  const activeDriverVendor = monitoring?.controller?.driver_vendor;
+  const isIpmiDriver = !!activeDriverVendor && activeDriverVendor !== 'Hwmon';
 
   const { data: settings } = useQuery<AppSettings>({
     queryKey: ['settings'],
@@ -88,10 +98,30 @@ export function Settings() {
 
   const startMutation = useMutation({
     mutationFn: settingsApi.startController,
+    onSuccess: (d) => {
+      setActionMsg({ text: d.message || 'Controller started' });
+      queryClient.invalidateQueries({ queryKey: ['monitoring'] });
+    },
+    onError: (e: Error) => setActionMsg({ text: e.message, error: true }),
   });
 
   const stopMutation = useMutation({
     mutationFn: settingsApi.stopController,
+    onSuccess: (d) => {
+      setActionMsg({ text: d.message || 'Controller stopped' });
+      queryClient.invalidateQueries({ queryKey: ['monitoring'] });
+    },
+    onError: (e: Error) => setActionMsg({ text: e.message, error: true }),
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: ({ current, next }: { current: string; next: string }) =>
+      authApi.changePassword(current, next),
+    onSuccess: () => {
+      setActionMsg({ text: 'Password changed' });
+      setIsChangingPassword(false);
+    },
+    onError: (e: Error) => setActionMsg({ text: e.message, error: true }),
   });
 
   const detectMutation = useMutation({
@@ -148,8 +178,17 @@ export function Settings() {
         </div>
       )}
 
+      {actionMsg && (
+        <div className={`p-3 rounded-lg flex items-center justify-between ${
+          actionMsg.error ? 'bg-red-900/40 border border-red-800 text-red-300' : 'bg-green-900/50 border border-green-800 text-green-400'}`}>
+          <span>{actionMsg.text}</span>
+          <button className="opacity-70 hover:opacity-100" onClick={() => setActionMsg(null)}>✕</button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* IPMI Connection */}
+        {/* IPMI Connection (BMC drivers only) */}
+        {isIpmiDriver && (
         <Card title="IPMI Connection">
           <div className="space-y-4">
             <div>
@@ -261,6 +300,7 @@ export function Settings() {
             )}
           </div>
         </Card>
+        )}
 
         {/* Motherboard Detection */}
         <Card title="Motherboard Detection">
@@ -275,10 +315,18 @@ export function Settings() {
             </div>
 
             <div>
-              <label className="input-label">Driver</label>
-              <div className="text-slate-300">
-                {settings?.motherboard_driver || 'Auto-detected'}
-              </div>
+              <label className="input-label">Driver (override)</label>
+              <select
+                className="select"
+                value={formData.motherboard_driver || ''}
+                onChange={(e) => handleChange('motherboard_driver', e.target.value)}
+              >
+                <option value="">Auto-detect</option>
+                {Array.from(new Set((driversQuery.data || []).map((d) => d.vendor))).map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">Force a specific driver, then Save to apply.</p>
             </div>
 
             <Button
@@ -506,6 +554,19 @@ export function Settings() {
           </div>
         </Card>
 
+        {/* Account */}
+        <Card title="Account">
+          <div className="space-y-3">
+            <p className="text-sm text-slate-400">
+              Signed in as <span className="text-slate-200">{user?.username}</span> ({user?.role}).
+            </p>
+            <Button variant="secondary" onClick={() => setIsChangingPassword(true)}>
+              <KeyRound className="w-4 h-4 mr-2" />
+              Change Password
+            </Button>
+          </div>
+        </Card>
+
         {/* User Management (Admin only) */}
         {user?.role === 'admin' && (
           <Card
@@ -559,7 +620,55 @@ export function Settings() {
         }
         isLoading={createUserMutation.isPending}
       />
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        isOpen={isChangingPassword}
+        onClose={() => setIsChangingPassword(false)}
+        onSave={(current, next) => changePasswordMutation.mutate({ current, next })}
+        isLoading={changePasswordMutation.isPending}
+      />
     </div>
+  );
+}
+
+function ChangePasswordModal({ isOpen, onClose, onSave, isLoading }: {
+  isOpen: boolean; onClose: () => void; onSave: (current: string, next: string) => void; isLoading: boolean;
+}) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const mismatch = next.length > 0 && next !== confirm;
+  const weak = next.length > 0 && next.length < 8;
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Change Password">
+      <div className="space-y-4">
+        <div>
+          <label className="input-label">Current password</label>
+          <input type="password" className="input" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        </div>
+        <div>
+          <label className="input-label">New password</label>
+          <input type="password" className="input" value={next} onChange={(e) => setNext(e.target.value)} />
+          <p className="text-xs text-slate-500 mt-1">At least 8 chars with upper, lower, digit, and a symbol.</p>
+        </div>
+        <div>
+          <label className="input-label">Confirm new password</label>
+          <input type="password" className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        </div>
+        {(mismatch || weak) && (
+          <p className="text-sm text-red-400">{mismatch ? 'Passwords do not match' : 'Password is too short'}</p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSave(current, next)} isLoading={isLoading}
+            disabled={!current || !next || mismatch || weak}>
+            Update
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

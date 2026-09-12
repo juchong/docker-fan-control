@@ -22,7 +22,8 @@ func NewLogsHandler(logger *services.EventLogger) *LogsHandler {
 
 // Allowed log levels and categories for validation
 var (
-	allowedLevels     = map[string]bool{"info": true, "warn": true, "error": true, "debug": true}
+	// Must match the values the logger actually stores (models.Level*).
+	allowedLevels     = map[string]bool{"info": true, "warning": true, "error": true}
 	allowedCategories = map[string]bool{
 		string(models.CategoryFan): true, string(models.CategoryProfile): true,
 		string(models.CategorySystem): true, string(models.CategoryIPMI): true,

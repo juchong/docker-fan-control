@@ -10,6 +10,13 @@ class ApiError extends Error {
   }
 }
 
+// Global 401 handler, registered by the auth layer. Lets any request that hits
+// an expired/invalid session drive a clean logout instead of silently erroring.
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn;
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -31,6 +38,15 @@ async function request<T>(
   });
 
   if (!response.ok) {
+    // An expired/invalid session on any authenticated call triggers a global
+    // logout. Login/status are excluded so a bad-credentials 401 doesn't loop.
+    if (
+      response.status === 401 &&
+      !endpoint.startsWith('/auth/login') &&
+      !endpoint.startsWith('/auth/status')
+    ) {
+      onUnauthorized?.();
+    }
     const text = await response.text();
     throw new ApiError(response.status, text || response.statusText);
   }

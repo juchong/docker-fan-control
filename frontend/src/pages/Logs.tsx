@@ -74,12 +74,14 @@ export function Logs() {
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
           </Button>
-          <div className="relative">
-            <Button variant="secondary" onClick={() => handleExport('csv')}>
-              <Download className="w-4 h-4 mr-2" />
-              Export CSV
-            </Button>
-          </div>
+          <Button variant="secondary" onClick={() => handleExport('csv')}>
+            <Download className="w-4 h-4 mr-2" />
+            CSV
+          </Button>
+          <Button variant="secondary" onClick={() => handleExport('json')}>
+            <Download className="w-4 h-4 mr-2" />
+            JSON
+          </Button>
           <Button
             variant="danger"
             onClick={() => {
