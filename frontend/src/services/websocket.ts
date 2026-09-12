@@ -5,12 +5,18 @@ type MessageHandler = (data: Monitoring) => void;
 class WebSocketService {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
+  private maxReconnectDelay = 30000;
   private handlers: Set<MessageHandler> = new Set();
   private isConnecting = false;
+  // Explicit stop flag: disconnect() sets this false so reconnection halts,
+  // instead of the old "bump attempts to the cap" hack (which meant we could
+  // never reconnect after a genuine drop). While true, we retry indefinitely
+  // with capped backoff so the dashboard recovers from long outages.
+  private shouldReconnect = true;
 
   connect() {
+    this.shouldReconnect = true;
     if (this.ws?.readyState === WebSocket.OPEN || this.isConnecting) {
       return;
     }
@@ -51,23 +57,22 @@ class WebSocketService {
   }
 
   disconnect() {
+    this.shouldReconnect = false;
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
-    this.reconnectAttempts = this.maxReconnectAttempts; // Prevent reconnection
   }
 
   private scheduleReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Max reconnection attempts reached');
+    if (!this.shouldReconnect) {
       return;
     }
-
     this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-    console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
-
+    const delay = Math.min(
+      this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelay
+    );
     setTimeout(() => {
       this.connect();
     }, delay);

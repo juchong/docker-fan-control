@@ -2,6 +2,7 @@ export interface Fan {
   id: number;
   ipmi_sensor_id: string;
   ipmi_zone?: number;
+  channel?: number;
   label?: string;
   detected_name?: string;
   min_rpm?: number;
@@ -20,6 +21,7 @@ export interface FanStatus {
   target_percent?: number;
   manual_override: boolean;
   ipmi_zone?: number;
+  channel?: number;
   assigned_profiles?: number[];
 }
 
@@ -27,6 +29,9 @@ export interface DetectedFan {
   sensor_id: string;
   name: string;
   rpm: number;
+  duty_cycle: number;
+  channel: number;
+  zone_id: number;
   status: string;
   unit: string;
 }
@@ -38,6 +43,7 @@ export interface UpdateFanRequest {
 
 export interface SetFanSpeedRequest {
   percent: number;
+  duration_seconds?: number;
 }
 
 export interface IdentifyFanRequest {

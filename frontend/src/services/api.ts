@@ -82,7 +82,7 @@ export const fansApi = {
 
   detect: () => request<unknown[]>('/fans/detect', { method: 'POST' }),
 
-  update: (id: number, data: { label?: string }) =>
+  update: (id: number, data: { label?: string; ipmi_zone?: number }) =>
     request<unknown>(`/fans/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -94,11 +94,14 @@ export const fansApi = {
       body: JSON.stringify({ duration }),
     }),
 
-  setSpeed: (id: number, percent: number) =>
+  setSpeed: (id: number, percent: number, durationSeconds?: number) =>
     request<{ message: string; percent: number }>(`/fans/${id}/speed`, {
       method: 'POST',
-      body: JSON.stringify({ percent }),
+      body: JSON.stringify({ percent, duration_seconds: durationSeconds }),
     }),
+
+  clearSpeed: (id: number) =>
+    request<{ message: string }>(`/fans/${id}/speed`, { method: 'DELETE' }),
 };
 
 // Profiles API

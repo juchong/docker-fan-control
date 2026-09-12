@@ -28,9 +28,16 @@ export interface DriveMetrics {
   temperature: number;
 }
 
+export interface BoardTempMetrics {
+  index: number;
+  name: string;
+  temperature: number;
+}
+
 export interface SystemMetrics {
   cpu_packages: CPUPackageMetrics[];
   drives: DriveMetrics[];
+  board_temps: BoardTempMetrics[];
   cpu_load: number;
   memory_used: number;
   memory_total: number;

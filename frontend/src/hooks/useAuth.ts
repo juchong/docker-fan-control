@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { authApi, ApiError } from '../services/api';
+import { wsService } from '../services/websocket';
 import { User, AuthState } from '../types/auth';
 
 export function useAuth() {
@@ -71,6 +72,8 @@ export function useAuth() {
     } catch {
       // Ignore errors
     }
+    // Stop the live feed so it doesn't 401-loop against the now-invalid session.
+    wsService.disconnect();
     localStorage.removeItem('auth_token');
     setState({
       user: null,
