@@ -154,7 +154,7 @@ function CollapsibleSection({
 
 export function Dashboard() {
   const { data: monitoring } = useMonitoring();
-  const history = useMetricsHistory(monitoring);
+  const history = useMetricsHistory();
   const queryClient = useQueryClient();
   const toast = useToast();
 
