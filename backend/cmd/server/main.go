@@ -54,7 +54,12 @@ func main() {
 		}
 	}
 
-	// Initialize driver system - register all available drivers
+	// Initialize driver system - register all available drivers.
+	// Hwmon (direct sysfs PWM, no BMC) is registered first and preferred; it is
+	// the path used on this host (ASUS ProArt X870E-CREATOR, nct6799). The IPMI
+	// drivers remain as fallbacks for BMC-equipped hosts. HWMON_CHIP optionally
+	// pins the hwmon chip name (default: auto-detect the nct6xxx Super-I/O).
+	ipmiSvc.RegisterDriver(drivers.NewHwmonDriver(os.Getenv("HWMON_CHIP")))
 	ipmiSvc.RegisterDriver(drivers.NewASRockDriver(ipmiSvc))
 	ipmiSvc.RegisterDriver(drivers.NewDellDriver(ipmiSvc))
 	ipmiSvc.RegisterDriver(drivers.NewSupermicroDriver(ipmiSvc))

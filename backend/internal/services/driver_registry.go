@@ -18,8 +18,10 @@ func NewDriverRegistry() *DriverRegistry {
 		preferredOrder: make(map[string]int),
 	}
 	
-	// Set preferred order (higher priority first)
+	// Set preferred order (higher priority first). Hwmon (direct sysfs PWM) is
+	// tried first so no-BMC hosts bind it before the IPMI drivers probe ipmitool.
 	registry.SetPreferredOrder([]string{
+		"Hwmon",
 		"ASRock Rack",
 		"Dell",
 		"Supermicro",
