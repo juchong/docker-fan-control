@@ -8,17 +8,22 @@ import { Modal } from '../components/common/Modal';
 import { ZoneLayoutEditor } from '../components/zones/ZoneLayoutEditor';
 import { ZoneLayout } from '../types/zone';
 import { FanStatus } from '../types/fan';
-import { AppSettings } from '../types/settings';
-import { 
-  Fan, 
-  Search, 
-  Edit2, 
-  Volume2, 
+import { AppSettings, DriverInfo } from '../types/settings';
+import {
+  Fan,
+  Search,
+  Edit2,
+  Volume2,
   Sliders,
   RefreshCw,
   Layers,
-  Settings2
+  RotateCcw,
 } from 'lucide-react';
+
+interface ZoneOption {
+  id: number;
+  name: string;
+}
 
 export function Fans() {
   const queryClient = useQueryClient();
@@ -28,10 +33,12 @@ export function Fans() {
   const [editingFanLabel, setEditingFanLabel] = useState<FanStatus | null>(null);
   const [newLabel, setNewLabel] = useState('');
   const [activeTab, setActiveTab] = useState<'fans' | 'zones'>('fans');
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: fans, isLoading, refetch } = useQuery({
     queryKey: ['fans'],
     queryFn: fansApi.list,
+    refetchInterval: 5000,
   });
 
   const { data: settings } = useQuery<AppSettings>({
@@ -39,33 +46,38 @@ export function Fans() {
     queryFn: settingsApi.get,
   });
 
+  const { data: drivers } = useQuery<DriverInfo[]>({
+    queryKey: ['drivers'],
+    queryFn: settingsApi.getAvailableDrivers,
+  });
+
   const zoneLayout = settings?.zone_layout ?? null;
 
   const detectMutation = useMutation({
     mutationFn: fansApi.detect,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fans'] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fans'] }),
+    onError: (e: Error) => setActionError(e.message),
   });
 
   const updateFanMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { label?: string } }) =>
+    mutationFn: ({ id, data }: { id: number; data: { label?: string; ipmi_zone?: number } }) =>
       fansApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fans'] });
       setEditingFanLabel(null);
     },
+    onError: (e: Error) => setActionError(e.message),
   });
 
   const updateSettingsMutation = useMutation({
     mutationFn: settingsApi.update,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
+    onError: (e: Error) => setActionError(e.message),
   });
 
   const identifyMutation = useMutation({
     mutationFn: (id: number) => fansApi.identify(id, 5),
+    onError: (e: Error) => setActionError(e.message),
   });
 
   const setSpeedMutation = useMutation({
@@ -73,23 +85,63 @@ export function Fans() {
       fansApi.setSpeed(id, percent),
     onSuccess: () => {
       setSpeedFan(null);
+      queryClient.invalidateQueries({ queryKey: ['fans'] });
     },
+    onError: (e: Error) => setActionError(e.message),
+  });
+
+  const clearSpeedMutation = useMutation({
+    mutationFn: (id: number) => fansApi.clearSpeed(id),
+    onSuccess: () => {
+      setSpeedFan(null);
+      queryClient.invalidateQueries({ queryKey: ['fans'] });
+    },
+    onError: (e: Error) => setActionError(e.message),
+  });
+
+  // Merge static fan data with real-time monitoring data.
+  const mergedFans: FanStatus[] = (fans as FanStatus[] || []).map((fan) => {
+    const liveData = monitoring?.fans?.find((f) => f.id === fan.id);
+    return liveData ? { ...fan, ...liveData } : fan;
+  });
+
+  // Available control zones come from the ACTIVE driver's zone layout (the
+  // single source of truth), falling back to the distinct zones the fans
+  // already occupy. Zone IDs match fan.ipmi_zone (for hwmon this is the PWM
+  // channel).
+  const activeVendor =
+    monitoring?.controller?.driver_vendor || monitoring?.controller?.motherboard_vendor;
+  const activeDriver =
+    (drivers || []).find((d) => d.vendor === activeVendor) || (drivers || [])[0];
+  const driverZones: ZoneOption[] =
+    activeDriver?.zone_layout?.zones?.map((z) => ({ id: z.id, name: z.name })) ?? [];
+  const derivedZones: ZoneOption[] = Array.from(
+    new Set(mergedFans.map((f) => f.ipmi_zone).filter((z): z is number => z != null))
+  )
+    .sort((a, b) => a - b)
+    .map((id) => ({ id, name: `Zone ${id}` }));
+  const zones: ZoneOption[] = driverZones.length ? driverZones : derivedZones;
+  const zoneName = (id: number | null | undefined) =>
+    id == null ? 'Unassigned' : zones.find((z) => z.id === id)?.name ?? `Zone ${id}`;
+
+  // Group fans by their assigned control zone (fan.ipmi_zone) — no more parsing
+  // the sensor name with a FAN(\d+) regex.
+  const fansByZone = new Map<number | null, FanStatus[]>();
+  mergedFans.forEach((fan) => {
+    const z = fan.ipmi_zone ?? null;
+    if (!fansByZone.has(z)) fansByZone.set(z, []);
+    fansByZone.get(z)!.push(fan);
+  });
+  const sortedZoneIds = Array.from(fansByZone.keys()).sort((a, b) => {
+    if (a === null) return 1;
+    if (b === null) return -1;
+    return a - b;
   });
 
   const handleSetSpeed = (fan: FanStatus) => {
     setSpeedFan(fan);
-    setSpeedValue(50);
-  };
-
-  const handleApplySpeed = () => {
-    if (speedFan) {
-      setSpeedMutation.mutate({ id: speedFan.id, percent: speedValue });
-    }
-  };
-
-  const handleEditLabel = (fan: FanStatus) => {
-    setEditingFanLabel(fan);
-    setNewLabel(fan.label || '');
+    // Seed from the fan's current duty so "nudge" is intuitive (was hardcoded 50).
+    setSpeedValue(fan.current_duty ?? 50);
   };
 
   const handleSaveLabel = () => {
@@ -105,62 +157,30 @@ export function Fans() {
     updateSettingsMutation.mutate({ zone_layout: layout });
   };
 
-  // Merge static fan data with real-time monitoring data
-  const mergedFans: FanStatus[] = (fans as FanStatus[] || []).map((fan) => {
-    const liveData = monitoring?.fans?.find((f) => f.id === fan.id);
-    return liveData ? { ...fan, ...liveData } : fan;
-  });
-
-  // Group fans by zone
-  const getFanZoneId = (fan: FanStatus): number | null => {
-    if (!zoneLayout) return null;
-    // Extract fan index from sensor ID (FAN1 = 0, FAN2 = 1, etc.)
-    const match = fan.ipmi_sensor_id?.match(/FAN(\d+)/i);
-    if (!match) return null;
-    const fanIndex = parseInt(match[1]) - 1;
-    
-    const zone = zoneLayout.zones.find(z => z.fan_indices.includes(fanIndex));
-    return zone?.id ?? null;
-  };
-
-  const fansByZone = new Map<number | null, FanStatus[]>();
-  mergedFans.forEach(fan => {
-    const zoneId = getFanZoneId(fan);
-    if (!fansByZone.has(zoneId)) {
-      fansByZone.set(zoneId, []);
-    }
-    fansByZone.get(zoneId)!.push(fan);
-  });
-
-  // Sort zones by ID
-  const sortedZoneIds = Array.from(fansByZone.keys()).sort((a, b) => {
-    if (a === null) return 1;
-    if (b === null) return -1;
-    return a - b;
-  });
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-100">Fans & Zones</h1>
+        <h1 className="text-2xl font-bold text-slate-100">Fans &amp; Zones</h1>
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => refetch()}
-            isLoading={isLoading}
-          >
+          <Button variant="secondary" onClick={() => refetch()} isLoading={isLoading}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
           </Button>
-          <Button
-            onClick={() => detectMutation.mutate()}
-            isLoading={detectMutation.isPending}
-          >
+          <Button onClick={() => detectMutation.mutate()} isLoading={detectMutation.isPending}>
             <Search className="w-4 h-4 mr-2" />
             Detect Fans
           </Button>
         </div>
       </div>
+
+      {actionError && (
+        <div className="p-3 bg-red-900/40 border border-red-800 rounded-lg text-red-300 flex items-center justify-between">
+          <span>{actionError}</span>
+          <button className="text-red-400 hover:text-red-200" onClick={() => setActionError(null)}>
+            ✕
+          </button>
+        </div>
+      )}
 
       {detectMutation.isSuccess && (
         <div className="p-3 bg-green-900/50 border border-green-800 rounded-lg text-green-400">
@@ -190,98 +210,58 @@ export function Fans() {
           }`}
         >
           <Layers className="w-4 h-4 inline mr-2" />
-          Zone Configuration
+          Zone Naming
         </button>
       </div>
 
       {activeTab === 'fans' ? (
-        <>
-          {/* Fans Tab Content */}
-          {zoneLayout && zoneLayout.zones.length > 0 ? (
-            // Display fans grouped by zone
-            <div className="space-y-6">
-              {sortedZoneIds.map(zoneId => {
-                const zoneFans = fansByZone.get(zoneId) || [];
-                const zone = zoneId !== null 
-                  ? zoneLayout.zones.find(z => z.id === zoneId)
-                  : null;
-                
-                return (
-                  <div key={zoneId ?? 'unassigned'} className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-lg font-semibold text-slate-200">
-                        {zone ? zone.name : 'Unassigned Fans'}
-                      </h2>
-                      {zone?.description && (
-                        <span className="text-sm text-slate-400">— {zone.description}</span>
-                      )}
-                      <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">
-                        {zoneFans.length} fan{zoneFans.length !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {zoneFans.map((fan) => (
-                        <FanCard
-                          key={fan.id}
-                          fan={fan}
-                          onEditLabel={() => handleEditLabel(fan)}
-                          onIdentify={() => identifyMutation.mutate(fan.id)}
-                          onSetSpeed={() => handleSetSpeed(fan)}
-                          isIdentifying={identifyMutation.isPending && identifyMutation.variables === fan.id}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            // No zone layout - display fans in a simple grid
-            <div className="space-y-4">
-              {!zoneLayout && (
-                <div className="p-4 bg-amber-900/30 border border-amber-700 rounded-lg">
-                  <div className="flex items-center gap-2 text-amber-400 mb-2">
-                    <Settings2 className="w-5 h-5" />
-                    <span className="font-medium">No zone layout configured</span>
-                  </div>
-                  <p className="text-sm text-slate-400">
-                    Configure zones in the "Zone Configuration" tab to organize your fans and enable profile-based control.
-                  </p>
+        <div className="space-y-6">
+          {sortedZoneIds.map((zoneId) => {
+            const zoneFans = fansByZone.get(zoneId) || [];
+            return (
+              <div key={zoneId ?? 'unassigned'} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold text-slate-200">{zoneName(zoneId)}</h2>
+                  <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">
+                    {zoneFans.length} fan{zoneFans.length !== 1 ? 's' : ''}
+                  </span>
                 </div>
-              )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {mergedFans.map((fan) => (
-                  <FanCard
-                    key={fan.id}
-                    fan={fan}
-                    onEditLabel={() => handleEditLabel(fan)}
-                    onIdentify={() => identifyMutation.mutate(fan.id)}
-                    onSetSpeed={() => handleSetSpeed(fan)}
-                    isIdentifying={identifyMutation.isPending && identifyMutation.variables === fan.id}
-                  />
-                ))}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {zoneFans.map((fan) => (
+                    <FanCard
+                      key={fan.id}
+                      fan={fan}
+                      zones={zones}
+                      onEditLabel={() => {
+                        setEditingFanLabel(fan);
+                        setNewLabel(fan.label || '');
+                      }}
+                      onIdentify={() => identifyMutation.mutate(fan.id)}
+                      onSetSpeed={() => handleSetSpeed(fan)}
+                      onAssignZone={(zid) => updateFanMutation.mutate({ id: fan.id, data: { ipmi_zone: zid } })}
+                      isIdentifying={identifyMutation.isPending && identifyMutation.variables === fan.id}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })}
 
           {mergedFans.length === 0 && !isLoading && (
             <div className="text-center py-12">
               <Fan className="w-12 h-12 text-slate-600 mx-auto mb-4" />
               <p className="text-slate-400">No fans detected</p>
-              <p className="text-sm text-slate-500 mt-1">Click "Detect Fans" to scan for IPMI fan sensors</p>
+              <p className="text-sm text-slate-500 mt-1">Click "Detect Fans" to scan for fan sensors</p>
             </div>
           )}
-        </>
+        </div>
       ) : (
-        /* Zones Tab Content */
-        <Card title="Zone Layout Configuration">
+        <Card title="Zone Naming (advanced)">
           <div className="space-y-4">
             <p className="text-sm text-slate-400">
-              Configure how fans are grouped into zones. Profiles use these zones to control fan speeds based on temperature inputs.
+              Fans are assigned to control zones directly on the Fans tab. This optional editor
+              lets you define named zone groupings used by older profiles.
             </p>
-            
             <ZoneLayoutEditor
               zoneLayout={zoneLayout}
               onSave={handleSaveZoneLayout}
@@ -293,11 +273,7 @@ export function Fans() {
       )}
 
       {/* Edit Label Modal */}
-      <Modal
-        isOpen={!!editingFanLabel}
-        onClose={() => setEditingFanLabel(null)}
-        title="Edit Fan Label"
-      >
+      <Modal isOpen={!!editingFanLabel} onClose={() => setEditingFanLabel(null)} title="Edit Fan Label">
         <div className="space-y-4">
           <div>
             <label className="input-label">Label</label>
@@ -340,6 +316,8 @@ export function Fans() {
               min={0}
               max={100}
               step={5}
+              aria-label="Fan speed percent"
+              aria-valuetext={`${speedValue} percent`}
             />
             <div className="flex justify-between text-xs text-slate-400 mt-1">
               <span>0%</span>
@@ -348,15 +326,29 @@ export function Fans() {
             </div>
           </div>
           <p className="text-sm text-slate-400">
-            This will set a manual override for this fan's zone. Profile-based control will be bypassed.
+            Sets a manual override for this fan's zone, bypassing profile control until you reset it.
           </p>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setSpeedFan(null)}>
-              Cancel
+          <div className="flex justify-between gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => speedFan && clearSpeedMutation.mutate(speedFan.id)}
+              isLoading={clearSpeedMutation.isPending}
+              disabled={!speedFan?.manual_override}
+            >
+              <RotateCcw className="w-4 h-4 mr-1" />
+              Reset to auto
             </Button>
-            <Button onClick={handleApplySpeed} isLoading={setSpeedMutation.isPending}>
-              Apply
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setSpeedFan(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => speedFan && setSpeedMutation.mutate({ id: speedFan.id, percent: speedValue })}
+                isLoading={setSpeedMutation.isPending}
+              >
+                Apply
+              </Button>
+            </div>
           </div>
         </div>
       </Modal>
@@ -367,77 +359,82 @@ export function Fans() {
 // Fan Card Component
 interface FanCardProps {
   fan: FanStatus;
+  zones: ZoneOption[];
   onEditLabel: () => void;
   onIdentify: () => void;
   onSetSpeed: () => void;
+  onAssignZone: (zoneId: number) => void;
   isIdentifying: boolean;
 }
 
-function FanCard({ fan, onEditLabel, onIdentify, onSetSpeed, isIdentifying }: FanCardProps) {
+function FanCard({ fan, zones, onEditLabel, onIdentify, onSetSpeed, onAssignZone, isIdentifying }: FanCardProps) {
   const isSpinning = fan.current_rpm > 0;
-  
+  const connected = fan.current_rpm > 0 || (fan.current_duty ?? 0) > 0;
+
   return (
     <Card>
       <div className="space-y-4">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <div className={`p-2 rounded-lg ${isSpinning ? 'bg-green-900/50' : 'bg-slate-700'}`}>
-              <Fan 
-                className={`w-6 h-6 ${isSpinning ? 'text-green-400' : 'text-slate-500'}`}
-                style={isSpinning ? { animation: 'spin 1s linear infinite' } : undefined}
+              <Fan
+                className={`w-6 h-6 ${isSpinning ? 'text-green-400 animate-spin' : 'text-slate-500'}`}
               />
             </div>
             <div>
               <h3 className="font-semibold text-slate-200">{fan.label || fan.ipmi_sensor_id}</h3>
-              <p className="text-sm text-slate-400">{fan.ipmi_sensor_id}</p>
+              <p className="text-sm text-slate-400">
+                {fan.ipmi_sensor_id}
+                {fan.channel != null && <span className="ml-1 text-slate-500">· pwm{fan.channel}</span>}
+              </p>
             </div>
           </div>
           {fan.manual_override && (
-            <span className="text-xs bg-yellow-900/50 text-yellow-400 px-2 py-1 rounded">
-              Manual
-            </span>
+            <span className="text-xs bg-yellow-900/50 text-yellow-400 px-2 py-1 rounded">Manual</span>
           )}
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-center">
           <div className="p-3 bg-slate-700/50 rounded-lg">
             <p className="text-2xl font-bold text-slate-100">{fan.current_rpm || 0}</p>
-            <p className="text-xs text-slate-400">RPM</p>
+            <p className="text-xs text-slate-400">RPM{!connected && ' (idle)'}</p>
           </div>
           <div className="p-3 bg-slate-700/50 rounded-lg">
-            <p className="text-2xl font-bold text-slate-100">
-              {fan.current_duty ?? '-'}
-            </p>
+            <p className="text-2xl font-bold text-slate-100">{fan.current_duty ?? '-'}</p>
             <p className="text-xs text-slate-400">Duty %</p>
           </div>
         </div>
 
-        <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            className="flex-1"
-            onClick={onEditLabel}
+        {/* Zone assignment */}
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-slate-400 whitespace-nowrap" htmlFor={`zone-${fan.id}`}>
+            Control zone
+          </label>
+          <select
+            id={`zone-${fan.id}`}
+            className="input py-1 text-sm flex-1"
+            value={fan.ipmi_zone ?? ''}
+            onChange={(e) => onAssignZone(parseInt(e.target.value))}
           >
+            {fan.ipmi_zone == null && <option value="">Unassigned</option>}
+            {zones.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" className="flex-1" onClick={onEditLabel}>
             <Edit2 className="w-4 h-4 mr-1" />
             Label
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="flex-1"
-            onClick={onIdentify}
-            isLoading={isIdentifying}
-          >
+          <Button variant="secondary" size="sm" className="flex-1" onClick={onIdentify} isLoading={isIdentifying}>
             <Volume2 className="w-4 h-4 mr-1" />
             Identify
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="flex-1"
-            onClick={onSetSpeed}
-          >
+          <Button variant="secondary" size="sm" className="flex-1" onClick={onSetSpeed}>
             <Sliders className="w-4 h-4 mr-1" />
             Speed
           </Button>

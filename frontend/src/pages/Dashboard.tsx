@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useMonitoring } from '../hooks/useMonitoring';
 import { Card } from '../components/common/Card';
-import { logsApi, settingsApi } from '../services/api';
-import { AppSettings } from '../types/settings';
-import { 
+import { logsApi } from '../services/api';
+import {
   Thermometer, 
   Cpu, 
   Fan, 
@@ -96,32 +95,16 @@ export function Dashboard() {
   const { data: monitoring } = useMonitoring();
   const isControllerRunning = monitoring?.controller?.running || false;
 
-  const { data: settings } = useQuery<AppSettings>({
-    queryKey: ['settings'],
-    queryFn: settingsApi.get,
-  });
-
   const { data: recentLogs } = useQuery({
     queryKey: ['recent-logs'],
     queryFn: () => logsApi.list({ limit: 5 }),
     refetchInterval: 10000,
   });
 
-  const zoneLayout = settings?.zone_layout ?? null;
-
   // Calculate max temperatures
   const maxGpuTemp = Math.max(...(monitoring?.gpus?.map(g => g.temperature) || [0]));
   const maxCpuTemp = Math.max(...(monitoring?.system?.cpu_packages?.map(c => c.temperature) || [0]));
   const maxDriveTemp = Math.max(...(monitoring?.system?.drives?.map(d => d.temperature) || [0]));
-
-  // Group fans by zone
-  const getFanZone = (fan: { id: number; ipmi_sensor_id?: string; label?: string }) => {
-    if (!zoneLayout) return null;
-    const match = (fan as { ipmi_sensor_id?: string }).ipmi_sensor_id?.match(/FAN(\d+)/i);
-    if (!match) return null;
-    const fanIndex = parseInt(match[1]) - 1;
-    return zoneLayout.zones.find(z => z.fan_indices.includes(fanIndex));
-  };
 
   return (
     <div className="space-y-6">
@@ -299,32 +282,46 @@ export function Dashboard() {
           )}
         </Card>
 
-        {/* Fan Status - Grouped by Zone */}
+        {/* Fan Status - grouped by control zone (fan.ipmi_zone) */}
         <Card title="Fans">
           {monitoring?.fans && monitoring.fans.length > 0 ? (
-            zoneLayout ? (
-              // Grouped by zone
-              <div className="space-y-4">
-                {zoneLayout.zones.map(zone => {
-                  const zoneFans = monitoring.fans.filter(f => {
-                    const fanZone = getFanZone(f);
-                    return fanZone?.id === zone.id;
-                  });
-                  
-                  if (zoneFans.length === 0) return null;
-                  
+            <div className="space-y-4">
+              {(() => {
+                const byZone = new Map<number | null, typeof monitoring.fans>();
+                monitoring.fans.forEach((f) => {
+                  const z = f.ipmi_zone ?? null;
+                  if (!byZone.has(z)) byZone.set(z, []);
+                  byZone.get(z)!.push(f);
+                });
+                const ids = Array.from(byZone.keys()).sort((a, b) =>
+                  a === null ? 1 : b === null ? -1 : a - b
+                );
+                return ids.map((zid) => {
+                  const zoneFans = byZone.get(zid)!;
                   return (
-                    <div key={zone.id} className="space-y-2">
+                    <div key={zid ?? 'unassigned'} className="space-y-2">
                       <div className="flex items-center gap-2 text-sm">
-                        <Layers className="w-4 h-4 text-slate-400" />
-                        <span className="font-medium text-slate-300">{zone.name}</span>
+                        {zid === null ? (
+                          <AlertTriangle className="w-4 h-4 text-yellow-400" />
+                        ) : (
+                          <Layers className="w-4 h-4 text-slate-400" />
+                        )}
+                        <span className="font-medium text-slate-300">
+                          {zid === null ? 'Unassigned' : `Zone ${zid}`}
+                        </span>
                         <span className="text-slate-500">({zoneFans.length})</span>
                       </div>
                       {zoneFans.map((fan) => (
-                        <div key={fan.id} className="flex items-center justify-between p-2 bg-slate-700/50 rounded-lg ml-6">
+                        <div
+                          key={fan.id}
+                          className="flex items-center justify-between p-2 bg-slate-700/50 rounded-lg ml-6"
+                        >
                           <div className="flex items-center gap-2">
-                            <Fan className={`w-4 h-4 ${fan.current_duty > 0 ? 'text-green-400' : 'text-slate-500'}`} />
+                            <Fan className={`w-4 h-4 ${fan.current_rpm > 0 ? 'text-green-400' : 'text-slate-500'}`} />
                             <span className="text-sm text-slate-200">{fan.label}</span>
+                            {fan.manual_override && (
+                              <span className="text-xs text-yellow-400">Manual</span>
+                            )}
                           </div>
                           <div className="text-right">
                             <span className="text-sm font-bold text-slate-200">{fan.current_rpm} RPM</span>
@@ -334,56 +331,9 @@ export function Dashboard() {
                       ))}
                     </div>
                   );
-                })}
-                
-                {/* Unassigned fans */}
-                {(() => {
-                  const unassignedFans = monitoring.fans.filter(f => !getFanZone(f));
-                  if (unassignedFans.length === 0) return null;
-                  
-                  return (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm">
-                        <AlertTriangle className="w-4 h-4 text-yellow-400" />
-                        <span className="font-medium text-slate-300">Unassigned</span>
-                        <span className="text-slate-500">({unassignedFans.length})</span>
-                      </div>
-                      {unassignedFans.map((fan) => (
-                        <div key={fan.id} className="flex items-center justify-between p-2 bg-slate-700/50 rounded-lg ml-6">
-                          <div className="flex items-center gap-2">
-                            <Fan className={`w-4 h-4 ${fan.current_duty > 0 ? 'text-green-400' : 'text-slate-500'}`} />
-                            <span className="text-sm text-slate-200">{fan.label}</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-sm font-bold text-slate-200">{fan.current_rpm} RPM</span>
-                            <span className="text-xs text-slate-400 ml-2">{fan.current_duty}%</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </div>
-            ) : (
-              // Simple list without zones
-              <CollapsibleSection title="System Fans" count={monitoring.fans.length} icon={Fan} iconColor="text-green-400">
-                {monitoring.fans.map((fan) => (
-                  <div key={fan.id} className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <Fan className={`w-5 h-5 ${fan.current_duty > 0 ? 'text-green-400' : 'text-slate-500'}`} />
-                      <div>
-                        <p className="font-medium text-slate-200">{fan.label}</p>
-                        {fan.manual_override && <span className="text-xs text-yellow-400">Manual</span>}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xl font-bold text-slate-200">{fan.current_rpm} RPM</p>
-                      <p className="text-sm text-slate-400">{fan.current_duty}%</p>
-                    </div>
-                  </div>
-                ))}
-              </CollapsibleSection>
-            )
+                });
+              })()}
+            </div>
           ) : (
             <p className="text-slate-400 text-center py-4">No fans detected</p>
           )}
