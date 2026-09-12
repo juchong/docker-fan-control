@@ -2,9 +2,11 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -75,7 +77,71 @@ func (s *SystemService) GetMetrics() (*models.SystemMetrics, error) {
 	// Get drive temperatures
 	metrics.Drives = s.GetDriveTemperatures()
 
+	// Get motherboard/VRM/chipset temperatures (Super-I/O)
+	metrics.BoardTemps = s.GetBoardTemperatures()
+
 	return metrics, nil
+}
+
+// GetBoardTemperatures returns motherboard/VRM/chipset temperatures from a
+// Nuvoton Super-I/O chip (nct6xxx). Aux/unconnected channels commonly read
+// bogus values (0, ~127, or negative), so readings outside a plausible range
+// are dropped. These are exposed as OPT-IN profile inputs only and never drive
+// the emergency threshold (see controller.getMaxTemperature).
+func (s *SystemService) GetBoardTemperatures() []models.BoardTempMetrics {
+	var temps []models.BoardTempMetrics
+	idx := 0
+
+	hwmonPaths, _ := filepath.Glob("/sys/class/hwmon/hwmon*/name")
+	for _, namePath := range hwmonPaths {
+		data, err := os.ReadFile(namePath)
+		if err != nil {
+			continue
+		}
+		name := strings.TrimSpace(string(data))
+		if !strings.HasPrefix(name, "nct6") {
+			continue
+		}
+
+		dir := filepath.Dir(namePath)
+		tempFiles, _ := filepath.Glob(filepath.Join(dir, "temp*_input"))
+		sort.Strings(tempFiles) // stable index ordering
+		for _, tf := range tempFiles {
+			tempData, err := os.ReadFile(tf)
+			if err != nil {
+				continue
+			}
+			temp, err := strconv.ParseFloat(strings.TrimSpace(string(tempData)), 64)
+			if err != nil {
+				continue
+			}
+			if temp > 1000 {
+				temp = temp / 1000.0 // millidegrees
+			}
+			// Per-sensor sanity: drop implausible/disconnected-sensor readings
+			// (nct6xxx aux channels report ~127C or 0C when nothing is attached).
+			if temp < 5 || temp > 125 {
+				continue
+			}
+
+			label := ""
+			if lb, err := os.ReadFile(strings.Replace(tf, "_input", "_label", 1)); err == nil {
+				label = strings.TrimSpace(string(lb))
+			}
+			if label == "" {
+				label = fmt.Sprintf("%s temp%d", name, idx)
+			}
+
+			temps = append(temps, models.BoardTempMetrics{
+				Index:       idx,
+				Name:        label,
+				Temperature: temp,
+			})
+			idx++
+		}
+	}
+
+	return temps
 }
 
 // GetCPUPackageTemperatures returns temperature readings for all CPU packages

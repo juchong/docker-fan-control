@@ -77,6 +77,23 @@ func (s *ProfileService) Create(ctx context.Context, req *models.CreateProfileRe
 		AlgorithmParams: req.AlgorithmParams,
 		Priority:        req.Priority,
 		Zones:           req.Zones,
+		// Explicit defaults; overridden below when the request supplies them.
+		SmoothTransition: true,
+		TransitionTime:   10,
+		MinRunTime:       30,
+		Hysteresis:       2.0,
+	}
+	if req.SmoothTransition != nil {
+		profile.SmoothTransition = *req.SmoothTransition
+	}
+	if req.TransitionTime != nil {
+		profile.TransitionTime = *req.TransitionTime
+	}
+	if req.MinRunTime != nil {
+		profile.MinRunTime = *req.MinRunTime
+	}
+	if req.Hysteresis != nil {
+		profile.Hysteresis = *req.Hysteresis
 	}
 
 	// Start transaction
@@ -140,6 +157,18 @@ func (s *ProfileService) Update(ctx context.Context, id uint, req *models.Update
 	}
 	if req.Zones != nil {
 		profile.Zones = *req.Zones
+	}
+	if req.SmoothTransition != nil {
+		profile.SmoothTransition = *req.SmoothTransition
+	}
+	if req.TransitionTime != nil {
+		profile.TransitionTime = *req.TransitionTime
+	}
+	if req.MinRunTime != nil {
+		profile.MinRunTime = *req.MinRunTime
+	}
+	if req.Hysteresis != nil {
+		profile.Hysteresis = *req.Hysteresis
 	}
 
 	if err := tx.Save(&profile).Error; err != nil {

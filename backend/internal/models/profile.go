@@ -17,10 +17,14 @@ type Profile struct {
 	IsActive        bool            `json:"is_active" gorm:"default:false"`
 	Priority        int             `json:"priority" gorm:"default:0"` // Higher = takes precedence
 	Zones           IntSlice        `json:"zones" gorm:"type:json"`    // Fan zones this profile controls
-	SmoothTransition bool            `json:"smooth_transition" gorm:"default:true"` // Enable smooth speed transitions
-	TransitionTime  int             `json:"transition_time" gorm:"default:10"` // Transition time in seconds (0-300)
-	MinRunTime      int             `json:"min_run_time" gorm:"default:30"` // Minimum time fan must run at speed in seconds
-	Hysteresis      float64         `json:"hysteresis" gorm:"default:2.0"` // Temperature hysteresis to prevent rapid toggling
+	// No gorm default tags: GORM treats a zero value (false / 0) as "unset" and
+	// substitutes the column default, which would make smooth_transition:false
+	// and min_run_time:0 impossible to store. Defaults are applied in the
+	// service layer (ProfileService.Create) instead.
+	SmoothTransition bool            `json:"smooth_transition"` // Enable smooth speed transitions
+	TransitionTime  int             `json:"transition_time"` // Transition time in seconds (0-300)
+	MinRunTime      int             `json:"min_run_time"` // Minimum time fan must run at speed in seconds
+	Hysteresis      float64         `json:"hysteresis"` // Temperature hysteresis to prevent rapid toggling
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 
@@ -150,10 +154,12 @@ type CreateProfileRequest struct {
 	Priority        int             `json:"priority,omitempty"`
 	Zones           []int           `json:"zones,omitempty"`
 	Inputs          []ProfileInput  `json:"inputs,omitempty"`
-	SmoothTransition bool            `json:"smooth_transition,omitempty"`
-	TransitionTime  int             `json:"transition_time,omitempty"`
-	MinRunTime      int             `json:"min_run_time,omitempty"`
-	Hysteresis      float64         `json:"hysteresis,omitempty"`
+	// Pointers so an omitted field keeps the model default rather than being
+	// forced to the zero value (an omitted smooth_transition must stay true).
+	SmoothTransition *bool    `json:"smooth_transition,omitempty"`
+	TransitionTime   *int     `json:"transition_time,omitempty"`
+	MinRunTime       *int     `json:"min_run_time,omitempty"`
+	Hysteresis       *float64 `json:"hysteresis,omitempty"`
 }
 
 // UpdateProfileRequest is the API request for updating a profile

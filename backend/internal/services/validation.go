@@ -487,6 +487,7 @@ func (v *ProfileValidator) validateProfileInputs(inputs []models.ProfileInput) e
 			models.InputTypeCPUTemp:   true,
 			models.InputTypeCPULoad:   true,
 			models.InputTypeDriveTemp: true,
+			models.InputTypeBoardTemp: true,
 		}
 
 		if !validTypes[input.InputType] {
@@ -518,15 +519,32 @@ func (v *ProfileValidator) validateProfileInputs(inputs []models.ProfileInput) e
 
 // ValidateProfileRequest validates a profile creation request
 func (v *ProfileValidator) ValidateProfileRequest(req *models.CreateProfileRequest) error {
-	// Convert request to profile for validation
+	// Convert request to profile for validation (with defaults for the optional
+	// tuning fields, overridden when the request supplies them).
 	profile := &models.Profile{
-		Name:            req.Name,
-		Description:     req.Description,
+		Name:             req.Name,
+		Description:      req.Description,
 		Algorithm:       req.Algorithm,
 		AlgorithmParams: req.AlgorithmParams,
 		Priority:        req.Priority,
 		Zones:           req.Zones,
 		Inputs:          req.Inputs,
+		SmoothTransition: true,
+		TransitionTime:   10,
+		MinRunTime:       30,
+		Hysteresis:       2.0,
+	}
+	if req.SmoothTransition != nil {
+		profile.SmoothTransition = *req.SmoothTransition
+	}
+	if req.TransitionTime != nil {
+		profile.TransitionTime = *req.TransitionTime
+	}
+	if req.MinRunTime != nil {
+		profile.MinRunTime = *req.MinRunTime
+	}
+	if req.Hysteresis != nil {
+		profile.Hysteresis = *req.Hysteresis
 	}
 
 	return v.ValidateProfile(profile)
@@ -560,6 +578,15 @@ func (v *ProfileValidator) ValidateProfileUpdate(req *models.UpdateProfileReques
 	}
 	if req.Inputs != nil {
 		profile.Inputs = *req.Inputs
+	}
+	if req.TransitionTime != nil {
+		profile.TransitionTime = *req.TransitionTime
+	}
+	if req.MinRunTime != nil {
+		profile.MinRunTime = *req.MinRunTime
+	}
+	if req.Hysteresis != nil {
+		profile.Hysteresis = *req.Hysteresis
 	}
 
 	return v.ValidateProfile(profile)

@@ -160,10 +160,18 @@ type GPUMetrics struct {
 type SystemMetrics struct {
 	CPUPackages []CPUPackageMetrics `json:"cpu_packages"`
 	Drives      []DriveMetrics      `json:"drives"`
+	BoardTemps  []BoardTempMetrics  `json:"board_temps"` // motherboard/VRM/chipset (nct6xxx)
 	CPULoad     float64             `json:"cpu_load"`     // Percent
 	MemoryUsed  uint64              `json:"memory_used"`
 	MemoryTotal uint64              `json:"memory_total"`
 	CPUTemp *float64 `json:"cpu_temp,omitempty"` // Celsius (max of all packages)
+}
+
+// BoardTempMetrics represents a motherboard temperature sensor (Super-I/O).
+type BoardTempMetrics struct {
+	Index       int     `json:"index"`
+	Name        string  `json:"name"`        // hwmon label, e.g. "SYSTIN", "AUXTIN0"
+	Temperature float64 `json:"temperature"` // Celsius
 }
 
 // CPUPackageMetrics represents metrics for a single CPU package/socket

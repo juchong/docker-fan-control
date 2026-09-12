@@ -617,6 +617,11 @@ func (c *FanController) gatherInputs() map[string]float64 {
 			}
 		}
 
+		// Board temperatures (motherboard/VRM/chipset)
+		for _, bt := range sysMetrics.BoardTemps {
+			inputs[models.InputTypeBoardTemp+strconv.Itoa(bt.Index)] = bt.Temperature
+		}
+
 		inputs[models.InputTypeCPULoad] = sysMetrics.CPULoad
 	}
 
