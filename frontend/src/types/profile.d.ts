@@ -7,6 +7,10 @@ export interface Profile {
   is_active: boolean;
   priority: number;
   zones?: number[];
+  smooth_transition?: boolean;
+  transition_time?: number;
+  min_run_time?: number;
+  hysteresis?: number;
   created_at: string;
   updated_at: string;
   inputs?: ProfileInput[];
@@ -32,8 +36,10 @@ export interface ProfileInput {
 }
 
 // Base params that all algorithms can have
+export type InputAggregation = 'or' | 'and' | 'max' | 'min' | 'avg' | 'weighted';
 export interface BaseAlgorithmParams {
-  input_aggregation?: 'or' | 'and'; // 'or' = max (default), 'and' = min
+  // 'or'/'max' (default), 'and'/'min', 'avg', or 'weighted' (uses per-input weights)
+  input_aggregation?: InputAggregation;
 }
 
 export type AlgorithmParams = (LinearParams | StepParams | PIDParams) & BaseAlgorithmParams;
@@ -63,7 +69,14 @@ export interface PIDParams {
   max_speed: number;
 }
 
-export interface CreateProfileRequest {
+export interface ProfileTuning {
+  smooth_transition?: boolean;
+  transition_time?: number;
+  min_run_time?: number;
+  hysteresis?: number;
+}
+
+export interface CreateProfileRequest extends ProfileTuning {
   name: string;
   description?: string;
   algorithm: string;
@@ -73,7 +86,7 @@ export interface CreateProfileRequest {
   inputs?: ProfileInput[];
 }
 
-export interface UpdateProfileRequest {
+export interface UpdateProfileRequest extends ProfileTuning {
   name?: string;
   description?: string;
   algorithm?: string;
