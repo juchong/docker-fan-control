@@ -16,13 +16,21 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
+  // Keep the latest onClose in a ref so the focus/key effect below can call it
+  // without listing onClose as a dependency. The parent often passes a fresh
+  // onClose on every render (and the editor re-renders on each live-metrics
+  // frame); if the effect depended on onClose it would re-run constantly and
+  // keep yanking focus back into the dialog while the user is typing.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!isOpen) return;
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
     document.body.style.overflow = 'hidden';
 
-    // Move focus into the dialog.
+    // Move focus into the dialog — once, when it opens.
     const panel = panelRef.current;
     if (panel) {
       const focusable = panel.querySelectorAll<HTMLElement>(FOCUSABLE);
@@ -31,7 +39,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== 'Tab') return;
@@ -62,7 +70,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
       document.body.style.overflow = 'unset';
       previouslyFocused?.focus?.();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
