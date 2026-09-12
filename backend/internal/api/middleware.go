@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -189,7 +190,53 @@ func isStringParam(param string) bool {
 }
 
 // RateLimiterMiddleware creates rate limiting middleware
-func RateLimiterMiddleware(authSvc *services.AuthService) func(next http.Handler) http.Handler {
+// RealClientIP sets r.RemoteAddr to the true client IP, trusting the
+// X-Forwarded-For / X-Real-IP headers ONLY when the direct connection comes
+// from a configured trusted proxy (e.g. the reverse proxy in front of this
+// service). This replaces chi/middleware.RealIP, which trusts those headers
+// unconditionally and lets any client spoof its IP to bypass or poison per-IP
+// rate limiting. With no trusted proxies configured, the socket peer is used.
+func RealClientIP(trusted []*net.IPNet) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ipInNets(hostOnly(r.RemoteAddr), trusted) {
+				if xrip := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(xrip) != nil {
+					r.RemoteAddr = net.JoinHostPort(xrip, "0")
+				} else if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+					first := strings.TrimSpace(strings.Split(xff, ",")[0]) // originating client
+					if net.ParseIP(first) != nil {
+						r.RemoteAddr = net.JoinHostPort(first, "0")
+					}
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// hostOnly strips the port from a host:port address, tolerating a bare host.
+func hostOnly(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
+}
+
+// ipInNets reports whether ipStr is inside any of the given networks.
+func ipInNets(ipStr string, nets []*net.IPNet) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	for _, n := range nets {
+		if n != nil && n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func RateLimiterMiddleware(authSvc *services.AuthService, authCfg *config.AuthConfig) func(next http.Handler) http.Handler {
 	store := memory.NewStore()
 	
 	// Strict rate limit for login attempts (per IP)
@@ -218,14 +265,10 @@ func RateLimiterMiddleware(authSvc *services.AuthService) func(next http.Handler
 				return
 			}
 			
-			// Get client IP for rate limiting
-			clientIP := r.Header.Get("X-Real-IP")
-			if clientIP == "" {
-				clientIP = r.Header.Get("X-Forwarded-For")
-			}
-			if clientIP == "" {
-				clientIP = r.RemoteAddr
-			}
+			// Client IP for rate limiting. RemoteAddr has already been resolved
+			// to the real client by RealClientIP (trusted-proxy aware), so we do
+			// NOT read spoofable X-Forwarded-* headers directly here.
+			clientIP := hostOnly(r.RemoteAddr)
 			
 			// Strict rate limiting for login endpoint
 			if r.URL.Path == "/api/auth/login" && r.Method == "POST" {
@@ -242,7 +285,7 @@ func RateLimiterMiddleware(authSvc *services.AuthService) func(next http.Handler
 			}
 			
 			// Check if user is authenticated
-			user, _ := extractUserFromRequest(r, authSvc)
+			user, _ := extractUserFromRequest(r, authSvc, authCfg)
 			
 			if user != nil {
 				// Apply rate limit for sensitive operations (authenticated users)
@@ -267,19 +310,23 @@ func RateLimiterMiddleware(authSvc *services.AuthService) func(next http.Handler
 	}
 }
 
-// extractUserFromRequest extracts user from request
-func extractUserFromRequest(r *http.Request, authSvc *services.AuthService) (*models.User, error) {
+// extractUserFromRequest extracts user from request (used for rate-limit
+// identity). Proxy-header auth is honored ONLY when explicitly enabled, so a
+// forged X-Forwarded-User cannot mint a rate-limit identity (or a DB user).
+func extractUserFromRequest(r *http.Request, authSvc *services.AuthService, authCfg *config.AuthConfig) (*models.User, error) {
 	// Check for JWT token
 	token := extractBearerToken(r)
 	if token != "" {
 		return authSvc.ValidateToken(token)
 	}
-	
-	// Check for proxy authentication
-	if proxyUser := r.Header.Get("X-Forwarded-User"); proxyUser != "" {
-		return authSvc.GetOrCreateProxyUser(r.Context(), proxyUser)
+
+	// Check for proxy authentication (only when configured).
+	if authCfg != nil && authCfg.ProxyAuthEnabled {
+		if proxyUser := r.Header.Get(authCfg.ProxyAuthHeader); proxyUser != "" {
+			return authSvc.GetOrCreateProxyUser(r.Context(), proxyUser, authCfg.ProxyAutoCreate)
+		}
 	}
-	
+
 	return nil, fmt.Errorf("unauthenticated")
 }
 
@@ -410,7 +457,7 @@ func AuthMiddleware(authSvc *services.AuthService, cfg *config.AuthConfig) func(
 			// Method 1: Check proxy auth header (if enabled)
 			if cfg.ProxyAuthEnabled {
 				if username := r.Header.Get(cfg.ProxyAuthHeader); username != "" {
-					user, err = authSvc.GetOrCreateProxyUser(r.Context(), username)
+					user, err = authSvc.GetOrCreateProxyUser(r.Context(), username, cfg.ProxyAutoCreate)
 					if err == nil {
 						ctx := context.WithValue(r.Context(), contextUserKey{}, user)
 						next.ServeHTTP(w, r.WithContext(ctx))

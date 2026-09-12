@@ -152,7 +152,7 @@ func (s *AuthService) CreateUser(ctx context.Context, username, password, role s
 }
 
 // GetOrCreateProxyUser gets or creates a user from proxy auth
-func (s *AuthService) GetOrCreateProxyUser(ctx context.Context, username string) (*models.User, error) {
+func (s *AuthService) GetOrCreateProxyUser(ctx context.Context, username string, autoCreate bool) (*models.User, error) {
 	var user models.User
 	err := database.DB.Where("username = ?", username).First(&user).Error
 	if err == nil {
@@ -164,6 +164,12 @@ func (s *AuthService) GetOrCreateProxyUser(ctx context.Context, username string)
 
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
+	}
+
+	// Respect AUTH_PROXY_AUTO_CREATE: never provision a new account from a
+	// header unless auto-create is explicitly enabled.
+	if !autoCreate {
+		return nil, errors.New("proxy user not found and auto-create is disabled")
 	}
 
 	// Create new user with cryptographically secure random password

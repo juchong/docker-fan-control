@@ -32,7 +32,9 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 
 	// Middleware
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// Trusted-proxy-aware client IP (replaces chi middleware.RealIP, which trusts
+	// spoofable X-Forwarded-* from any peer). Configure TRUSTED_PROXIES.
+	r.Use(RealClientIP(cfg.Server.TrustedProxies))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
@@ -44,7 +46,7 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 	r.Use(AddAuthServiceToContext(svc.Auth))
 
 	// Rate limiting
-	r.Use(RateLimiterMiddleware(svc.Auth))
+	r.Use(RateLimiterMiddleware(svc.Auth, &cfg.Auth))
 
 	// Session timeout
 	r.Use(SessionTimeoutMiddleware(svc.Auth, cfg.Auth.SessionTimeout))

@@ -1,9 +1,13 @@
 package config
 
 import (
+	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // Config holds all application configuration
@@ -20,6 +24,11 @@ type ServerConfig struct {
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 	APIBasePath  string
+	// TrustedProxies are CIDRs (from TRUSTED_PROXIES) whose X-Forwarded-For /
+	// X-Real-IP headers are believed. Requests whose direct peer is outside
+	// these ranges use the socket peer IP, so a client cannot spoof its IP to
+	// bypass or poison per-IP rate limiting. Empty = trust no forwarding headers.
+	TrustedProxies []*net.IPNet
 }
 
 // IPMIConfig holds IPMI connection settings
@@ -58,7 +67,8 @@ func Load() *Config {
 			Port:         getEnvInt("SERVER_PORT", 8080),
 			ReadTimeout:  getEnvDuration("SERVER_READ_TIMEOUT", 30*time.Second),
 			WriteTimeout: getEnvDuration("SERVER_WRITE_TIMEOUT", 30*time.Second),
-			APIBasePath:  getEnv("API_BASE_PATH", "/api"),
+			APIBasePath:    getEnv("API_BASE_PATH", "/api"),
+			TrustedProxies: getEnvCIDRs("TRUSTED_PROXIES"),
 		},
 		IPMI: IPMIConfig{
 			Mode:     getEnv("IPMI_MODE", "local"),
@@ -109,6 +119,37 @@ func getEnvBool(key string, defaultValue bool) bool {
 		}
 	}
 	return defaultValue
+}
+
+// getEnvCIDRs parses a comma-separated list of CIDRs (bare IPs are accepted as
+// /32 or /128). Invalid entries are logged and skipped.
+func getEnvCIDRs(key string) []*net.IPNet {
+	value := os.Getenv(key)
+	if value == "" {
+		return nil
+	}
+	var nets []*net.IPNet
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if !strings.Contains(part, "/") {
+			if ip := net.ParseIP(part); ip != nil {
+				if ip.To4() != nil {
+					part += "/32"
+				} else {
+					part += "/128"
+				}
+			}
+		}
+		if _, ipNet, err := net.ParseCIDR(part); err == nil {
+			nets = append(nets, ipNet)
+		} else {
+			log.Warn().Str("entry", part).Str("env", key).Msg("ignoring invalid CIDR in TRUSTED_PROXIES")
+		}
+	}
+	return nets
 }
 
 func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
