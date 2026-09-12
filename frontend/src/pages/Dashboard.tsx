@@ -269,63 +269,49 @@ export function Dashboard() {
         </Suspense>
       </Card>
 
-      {/* Fans as radial gauges, grouped by control zone */}
+      {/* Fans as radial gauges — one wide grid that fills the row. Each card
+          carries its control-zone chip (grouping is 1 fan per PWM channel on
+          hwmon, so per-zone sections would just stack single gauges). */}
       <Card title="Fans">
         {monitoring?.fans && monitoring.fans.length > 0 ? (
-          <div className="space-y-5">
-            {(() => {
-              const byZone = new Map<number | null, typeof monitoring.fans>();
-              monitoring.fans.forEach((f) => {
-                const z = f.ipmi_zone ?? null;
-                if (!byZone.has(z)) byZone.set(z, []);
-                byZone.get(z)!.push(f);
-              });
-              const ids = Array.from(byZone.keys()).sort((a, b) =>
-                a === null ? 1 : b === null ? -1 : a - b
-              );
-              return ids.map((zid) => {
-                const zoneFans = byZone.get(zid)!;
-                return (
-                  <div key={zid ?? 'unassigned'} className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm">
-                      {zid === null ? (
-                        <AlertTriangle className="w-4 h-4 text-warn" />
-                      ) : (
-                        <Layers className="w-4 h-4 text-muted" />
-                      )}
-                      <span className="font-medium text-fg-3">
-                        {zid === null ? 'Unassigned' : `Zone ${zid}`}
-                      </span>
-                      <span className="text-muted-2">({zoneFans.length})</span>
-                    </div>
-                    <div className="flex flex-wrap gap-4">
-                      {zoneFans.map((fan) => (
-                        <div
-                          key={fan.id}
-                          className="flex flex-col items-center p-3 bg-surface-2/50 rounded-lg w-36"
-                        >
-                          <RadialGauge
-                            value={fan.current_duty ?? 0}
-                            tone={dutyTone(fan.current_duty ?? 0)}
-                            size={104}
-                          />
-                          <span
-                            className="mt-2 text-sm font-medium text-fg-2 text-center truncate w-full"
-                            title={fan.label}
-                          >
-                            {fan.label}
-                          </span>
-                          <span className="text-xs text-muted tabular-nums">{fan.current_rpm} RPM</span>
-                          {fan.manual_override && (
-                            <span className="mt-1 text-[10px] uppercase tracking-wide text-warn">Manual</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              });
-            })()}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+            {[...monitoring.fans]
+              .sort((a, b) => (a.ipmi_zone ?? Infinity) - (b.ipmi_zone ?? Infinity))
+              .map((fan) => (
+                <div
+                  key={fan.id}
+                  className="flex flex-col items-center p-3 bg-surface-2/50 rounded-lg"
+                >
+                  <RadialGauge
+                    value={fan.current_duty ?? 0}
+                    tone={dutyTone(fan.current_duty ?? 0)}
+                    size={104}
+                  />
+                  <span
+                    className="mt-2 text-sm font-medium text-fg-2 text-center truncate w-full"
+                    title={fan.label}
+                  >
+                    {fan.label}
+                  </span>
+                  <span className="text-xs text-muted tabular-nums">{fan.current_rpm} RPM</span>
+                  <span className="mt-1 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-2">
+                    {fan.ipmi_zone == null ? (
+                      <>
+                        <AlertTriangle className="w-3 h-3 text-warn" />
+                        Unassigned
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-3 h-3" />
+                        Zone {fan.ipmi_zone}
+                      </>
+                    )}
+                  </span>
+                  {fan.manual_override && (
+                    <span className="mt-0.5 text-[10px] uppercase tracking-wide text-warn">Manual</span>
+                  )}
+                </div>
+              ))}
           </div>
         ) : (
           <p className="text-muted text-center py-4">No fans detected</p>
@@ -333,7 +319,7 @@ export function Dashboard() {
       </Card>
 
       {/* Temperature sensors */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         <Card title="GPUs">
           {monitoring?.gpus && monitoring.gpus.length > 0 ? (
             <CollapsibleSection
@@ -386,9 +372,7 @@ export function Dashboard() {
             <p className="text-muted text-center py-4">No CPU sensors detected</p>
           )}
         </Card>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Drives */}
         <Card title="Drives">
           {monitoring?.system?.drives && monitoring.system.drives.length > 0 ? (
@@ -418,9 +402,10 @@ export function Dashboard() {
             <p className="text-muted text-center py-4">No drives detected</p>
           )}
         </Card>
+      </div>
 
-        {/* Recent events */}
-        <Card title="Recent Events">
+      {/* Recent events */}
+      <Card title="Recent Events">
           <div className="space-y-2">
             {(recentLogs as { events?: Array<{ id: number; timestamp: string; level: string; message: string }> })?.events?.map(
               (event) => (
@@ -447,7 +432,6 @@ export function Dashboard() {
             )}
           </div>
         </Card>
-      </div>
     </div>
   );
 }

@@ -132,22 +132,12 @@ export function Fans() {
     .sort((a, b) => a - b)
     .map((id) => ({ id, name: `Zone ${id}` }));
   const zones: ZoneOption[] = driverZones.length ? driverZones : derivedZones;
-  const zoneName = (id: number | null | undefined) =>
-    id == null ? 'Unassigned' : zones.find((z) => z.id === id)?.name ?? `Zone ${id}`;
-
-  // Group fans by their assigned control zone (fan.ipmi_zone) — no more parsing
-  // the sensor name with a FAN(\d+) regex.
-  const fansByZone = new Map<number | null, FanStatus[]>();
-  mergedFans.forEach((fan) => {
-    const z = fan.ipmi_zone ?? null;
-    if (!fansByZone.has(z)) fansByZone.set(z, []);
-    fansByZone.get(z)!.push(fan);
-  });
-  const sortedZoneIds = Array.from(fansByZone.keys()).sort((a, b) => {
-    if (a === null) return 1;
-    if (b === null) return -1;
-    return a - b;
-  });
+  // Show all fans in one wide grid, sorted by control zone. Each hwmon PWM
+  // channel is its own zone, so per-zone sections would just stack single
+  // cards; the per-card zone selector still shows and sets each fan's zone.
+  const sortedFans = [...mergedFans].sort(
+    (a, b) => (a.ipmi_zone ?? Infinity) - (b.ipmi_zone ?? Infinity)
+  );
 
   const handleSetSpeed = (fan: FanStatus) => {
     setSpeedFan(fan);
@@ -212,39 +202,28 @@ export function Fans() {
 
       {activeTab === 'fans' ? (
         <div className="space-y-6">
-          {sortedZoneIds.map((zoneId) => {
-            const zoneFans = fansByZone.get(zoneId) || [];
-            return (
-              <div key={zoneId ?? 'unassigned'} className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold text-fg-2">{zoneName(zoneId)}</h2>
-                  <span className="text-xs bg-surface-2 text-fg-3 px-2 py-0.5 rounded">
-                    {zoneFans.length} fan{zoneFans.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {zoneFans.map((fan) => (
-                    <FanCard
-                      key={fan.id}
-                      fan={fan}
-                      zones={zones}
-                      onEditLabel={() => {
-                        setEditingFanLabel(fan);
-                        setNewLabel(fan.label || '');
-                      }}
-                      onIdentify={() => identifyMutation.mutate(fan.id)}
-                      onSetSpeed={() => handleSetSpeed(fan)}
-                      onAssignZone={(zid) => updateFanMutation.mutate({ id: fan.id, data: { ipmi_zone: zid } })}
-                      isIdentifying={identifyMutation.isPending && identifyMutation.variables === fan.id}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+          {sortedFans.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {sortedFans.map((fan) => (
+                <FanCard
+                  key={fan.id}
+                  fan={fan}
+                  zones={zones}
+                  onEditLabel={() => {
+                    setEditingFanLabel(fan);
+                    setNewLabel(fan.label || '');
+                  }}
+                  onIdentify={() => identifyMutation.mutate(fan.id)}
+                  onSetSpeed={() => handleSetSpeed(fan)}
+                  onAssignZone={(zid) => updateFanMutation.mutate({ id: fan.id, data: { ipmi_zone: zid } })}
+                  isIdentifying={identifyMutation.isPending && identifyMutation.variables === fan.id}
+                />
+              ))}
+            </div>
+          )}
 
           {isLoading && mergedFans.length === 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {Array.from({ length: 6 }).map((_, i) => (
                 <Card key={`skel-${i}`}>
                   <div className="space-y-4" aria-hidden="true">

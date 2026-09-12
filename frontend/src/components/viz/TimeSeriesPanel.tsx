@@ -46,10 +46,11 @@ export default function TimeSeriesPanel({ history }: { history: MetricSample[] }
     [history]
   );
 
-  if (history.length < 2) {
+  if (history.length < 3) {
     return (
-      <div className="flex items-center justify-center h-64 text-sm text-muted">
-        Collecting data… the chart appears after a few samples.
+      <div className="flex flex-col items-center justify-center h-64 gap-2 text-sm text-muted">
+        <span className="inline-block w-5 h-5 border-2 border-line border-t-primary-500 rounded-full animate-spin" aria-hidden="true" />
+        Collecting live data… the chart fills in over the next few seconds.
       </div>
     );
   }
@@ -73,7 +74,13 @@ export default function TimeSeriesPanel({ history }: { history: MetricSample[] }
             tick={{ fill: axisColor, fontSize: 11 }}
             stroke={axisColor}
             width={40}
-            domain={['auto', 'auto']}
+            allowDecimals={false}
+            // Round to 10°C steps with padding so the axis holds steady instead
+            // of rescaling on every new sample.
+            domain={[
+              (min: number) => Math.max(0, Math.floor((min - 5) / 10) * 10),
+              (max: number) => Math.ceil((max + 5) / 10) * 10,
+            ]}
             unit="°"
           />
           <YAxis
