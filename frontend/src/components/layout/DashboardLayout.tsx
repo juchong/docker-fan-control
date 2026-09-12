@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { DegradedBanner } from '../common/DegradedBanner';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -21,6 +22,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex-1 flex flex-col min-w-0">
         <Header onMenuClick={() => setSidebarOpen(true)} />
+        <DegradedBanner />
         <main className="flex-1 p-4 sm:p-6 overflow-auto">{children}</main>
       </div>
     </div>
