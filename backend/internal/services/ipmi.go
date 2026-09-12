@@ -439,6 +439,28 @@ func (s *IPMIService) GetFanReadings(ctx context.Context) (map[string]FanReading
 	}
 	s.mu.RUnlock()
 
+	// Prefer a driver that reports RPM+duty together, keyed by the same SensorID
+	// it emits (e.g. the hwmon driver). This avoids the case-sensitive "FAN%d"
+	// scanf below, which never matched lowercase "fanN" ids.
+	s.mu.RLock()
+	driver := s.driver
+	s.mu.RUnlock()
+	if p, ok := driver.(FanReadingProvider); ok {
+		readings, err := p.GetFanReadings(ctx)
+		if err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		s.cachedFanReadings = readings
+		s.cachedFanReadingsAt = time.Now()
+		s.mu.Unlock()
+		result := make(map[string]FanReading, len(readings))
+		for k, v := range readings {
+			result[k] = v
+		}
+		return result, nil
+	}
+
 	// Get RPM readings via GetFanSpeeds (which has its own caching/coalescing)
 	speeds, err := s.GetFanSpeeds(ctx)
 	if err != nil {

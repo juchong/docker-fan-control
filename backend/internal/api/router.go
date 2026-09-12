@@ -143,6 +143,7 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 			r.Put("/fans/{id}", fansHandler.Update)
 			r.Post("/fans/{id}/identify", fansHandler.Identify)
 			r.Post("/fans/{id}/speed", fansHandler.SetSpeed)
+			r.Delete("/fans/{id}/speed", fansHandler.ClearSpeed)
 
 			// Profiles
 			r.Get("/profiles", profilesHandler.List)

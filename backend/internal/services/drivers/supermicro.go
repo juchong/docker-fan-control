@@ -94,10 +94,14 @@ func (d *SupermicroDriver) DetectFans(ctx context.Context) ([]models.DetectedFan
 		matches := fanRegex.FindStringSubmatch(line)
 		if matches != nil {
 			rpm, _ := strconv.Atoi(matches[2])
+			idx := len(fans) // ordinal fan index → control zone via the layout
+			zone, _ := d.GetZoneForFan(idx)
 			fans = append(fans, models.DetectedFan{
 				SensorID: strings.TrimSpace(matches[1]),
 				Name:     strings.TrimSpace(matches[1]),
 				RPM:      rpm,
+				Channel:  idx + 1,
+				ZoneID:   zone,
 				Unit:     matches[3],
 				Status:   strings.ToLower(matches[4]),
 			})

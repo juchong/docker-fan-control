@@ -77,13 +77,15 @@ func NewHwmonDriver(preferName string) *HwmonDriver {
 	return d
 }
 
-// buildZoneLayout exposes one zone per PWM channel (zone ID == fan index ==
-// position in d.channels), so profiles can target each header independently.
+// buildZoneLayout exposes one zone per PWM channel. The zone ID is the hardware
+// channel number (pwmN), NOT the slice position, so a profile's stored zone
+// keeps addressing the same physical fan even if the set of present channels
+// changes between detections. Profiles group fans by selecting multiple zones.
 func (d *HwmonDriver) buildZoneLayout() services.ZoneLayout {
 	zones := make([]services.ZoneDefinition, 0, len(d.channels))
 	for i, ch := range d.channels {
 		zones = append(zones, services.ZoneDefinition{
-			ID:          i,
+			ID:          ch,
 			Name:        fmt.Sprintf("Fan %d", ch),
 			FanIndices:  []int{i},
 			Description: fmt.Sprintf("pwm%d on %s", ch, d.chipName),
@@ -236,22 +238,52 @@ func (d *HwmonDriver) Discover(ctx context.Context) error {
 	return nil
 }
 
-// DetectFans returns one entry per PWM channel, with live tach RPM.
+// DetectFans returns one entry per PWM channel. It is the single source of the
+// SensorID<->Channel<->ZoneID mapping: SensorID is keyed on the hardware channel
+// (stable across re-detect even if the present-channel set changes), Channel is
+// that hardware channel, and ZoneID is the slice position that SetFanSpeed and
+// the zone layout use.
 func (d *HwmonDriver) DetectFans(ctx context.Context) ([]models.DetectedFan, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	fans := make([]models.DetectedFan, 0, len(d.channels))
 	for _, ch := range d.channels {
 		rpm, _ := d.readInt(filepath.Join(d.path, fmt.Sprintf("fan%d_input", ch)))
+		duty := -1
+		if pwm, ok := d.readInt(d.attr(ch, "")); ok {
+			duty = pwmToPct(pwm)
+		}
 		fans = append(fans, models.DetectedFan{
-			SensorID: fmt.Sprintf("fan%d", ch),
-			Name:     fmt.Sprintf("fan%d", ch),
-			RPM:      rpm,
-			Unit:     "RPM",
-			Status:   "ok",
+			SensorID:  fmt.Sprintf("fan%d", ch),
+			Name:      fmt.Sprintf("fan%d", ch),
+			RPM:       rpm,
+			DutyCycle: duty,
+			Channel:   ch,
+			ZoneID:    ch,
+			Unit:      "RPM",
+			Status:    "ok",
 		})
 	}
 	return fans, nil
+}
+
+// GetFanReadings returns RPM+duty per channel, keyed by the same "fanN" SensorID
+// the driver emits everywhere. Implements services.FanReadingProvider so
+// IPMIService.GetFanReadings gets correct duty without the case-sensitive
+// "FAN%d" scanf that never matched these lowercase ids.
+func (d *HwmonDriver) GetFanReadings(ctx context.Context) (map[string]services.FanReading, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make(map[string]services.FanReading, len(d.channels))
+	for _, ch := range d.channels {
+		rpm, _ := d.readInt(filepath.Join(d.path, fmt.Sprintf("fan%d_input", ch)))
+		duty := 0
+		if pwm, ok := d.readInt(d.attr(ch, "")); ok {
+			duty = pwmToPct(pwm)
+		}
+		out[fmt.Sprintf("fan%d", ch)] = services.FanReading{RPM: rpm, DutyCycle: duty}
+	}
+	return out, nil
 }
 
 // GetFanSpeeds returns sensor name -> RPM for every channel.
@@ -287,23 +319,32 @@ func (d *HwmonDriver) setChannel(ch, percent int) error {
 	return d.writeAttr(d.attr(ch, ""), strconv.Itoa(pctToPWM(percent)))
 }
 
-// SetFanSpeed sets one zone (== fan index) to percent. zone<0 sets all.
+// SetFanSpeed sets one zone (== PWM channel number) to percent. zone<0 sets all.
 func (d *HwmonDriver) SetFanSpeed(ctx context.Context, zone int, percent int) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if zone < 0 {
 		return d.setAllLocked(percent)
 	}
-	if zone >= len(d.channels) {
-		return fmt.Errorf("hwmon: zone %d out of range (have %d channels)", zone, len(d.channels))
+	if !d.hasChannelLocked(zone) {
+		return fmt.Errorf("hwmon: zone %d is not a present PWM channel", zone)
 	}
-	ch := d.channels[zone]
-	if err := d.setChannel(ch, percent); err != nil {
+	if err := d.setChannel(zone, percent); err != nil {
 		return err
 	}
 	d.manualMode = true
-	log.Debug().Int("zone", zone).Int("pwm_channel", ch).Int("percent", percent).Msg("hwmon set fan speed")
+	log.Debug().Int("zone_channel", zone).Int("percent", percent).Msg("hwmon set fan speed")
 	return nil
+}
+
+// hasChannelLocked reports whether ch is a present PWM channel. Caller holds mu.
+func (d *HwmonDriver) hasChannelLocked(ch int) bool {
+	for _, c := range d.channels {
+		if c == ch {
+			return true
+		}
+	}
+	return false
 }
 
 // SetAllFanSpeeds sets every channel to percent.

@@ -224,7 +224,8 @@ func (s *FanService) Get(ctx context.Context, id uint) (*models.Fan, error) {
 	return &fan, nil
 }
 
-// Update updates a fan (only label can be changed - zones are defined in zone layout)
+// Update updates a fan's label and/or its control zone. The caller (handler)
+// validates ipmi_zone against the active driver's zone layout before calling.
 func (s *FanService) Update(ctx context.Context, id uint, req *models.UpdateFanRequest) (*models.Fan, error) {
 	var fan models.Fan
 	if err := database.DB.First(&fan, id).Error; err != nil {
@@ -236,6 +237,9 @@ func (s *FanService) Update(ctx context.Context, id uint, req *models.UpdateFanR
 
 	if req.Label != nil {
 		fan.Label = *req.Label
+	}
+	if req.IPMIZone != nil {
+		fan.IPMIZone = req.IPMIZone
 	}
 
 	if err := database.DB.Save(&fan).Error; err != nil {
@@ -252,12 +256,24 @@ func (s *FanService) SaveDetectedFans(ctx context.Context, detected []models.Det
 	for _, d := range detected {
 		var fan models.Fan
 		err := database.DB.Where("ipmi_sensor_id = ?", d.SensorID).First(&fan).Error
-		
+
+		// Only drivers that report a hardware channel (Channel>0) carry a
+		// trustworthy zone mapping. For those, seed the control zone so manual
+		// speed/identify work, and keep the channel fresh. A user's explicit
+		// zone override (set via PUT /fans/{id}) survives re-detection.
+		ch := d.Channel
+		zone := d.ZoneID
+
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Create new fan
 			fan = models.Fan{
 				IPMISensorID: d.SensorID,
 				DetectedName: d.Name,
+			}
+			if ch > 0 {
+				c := ch
+				z := zone
+				fan.Channel = &c
+				fan.IPMIZone = &z
 			}
 			if err := database.DB.Create(&fan).Error; err != nil {
 				return nil, err
@@ -265,9 +281,24 @@ func (s *FanService) SaveDetectedFans(ctx context.Context, detected []models.Det
 		} else if err != nil {
 			return nil, err
 		} else {
-			// Update detected name if changed
+			changed := false
 			if fan.DetectedName != d.Name {
 				fan.DetectedName = d.Name
+				changed = true
+			}
+			if ch > 0 {
+				if fan.Channel == nil || *fan.Channel != ch {
+					c := ch
+					fan.Channel = &c
+					changed = true
+				}
+				if fan.IPMIZone == nil { // seed only; never clobber a user override
+					z := zone
+					fan.IPMIZone = &z
+					changed = true
+				}
+			}
+			if changed {
 				database.DB.Save(&fan)
 			}
 		}

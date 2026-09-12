@@ -14,6 +14,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// manualOverride is a per-fan manual speed. A zero expiresAt means sticky until
+// explicitly cleared via ClearManualOverride.
+type manualOverride struct {
+	percent   int
+	expiresAt time.Time
+}
+
 // FanController manages the main fan control loop
 type FanController struct {
 	ipmi      *IPMIService
@@ -26,7 +33,7 @@ type FanController struct {
 	mu        sync.RWMutex
 
 	// Current state
-	manualOverrides map[uint]int // fan ID -> percent
+	manualOverrides map[uint]manualOverride // fan ID -> override
 	lastSpeeds      map[int]int  // zone -> percent
 	zoneLastChanged map[int]time.Time // zone -> last change time
 	zoneTargetSpeeds map[int]int  // zone -> target speed (for smoothing)
@@ -45,7 +52,7 @@ func NewFanController(ipmi *IPMIService, gpu *GPUService, system *SystemService,
 		logger:          logger,
 		interval:        5 * time.Second,
 		stopCh:          make(chan struct{}),
-		manualOverrides: make(map[uint]int),
+		manualOverrides: make(map[uint]manualOverride),
 		lastSpeeds:      make(map[int]int),
 		zoneLastChanged: make(map[int]time.Time),
 		zoneTargetSpeeds: make(map[int]int),
@@ -145,26 +152,48 @@ func (c *FanController) DeactivateProfile(profileID uint) {
 	database.DB.Model(&models.Profile{}).Where("id = ?", profileID).Update("is_active", false)
 }
 
-// SetManualOverride sets a manual speed override for a fan
-func (c *FanController) SetManualOverride(fanID uint, percent int) {
+// SetManualOverride sets a manual speed override for a fan. duration<=0 makes it
+// sticky (cleared only via ClearManualOverride or a new override).
+func (c *FanController) SetManualOverride(fanID uint, percent int, duration time.Duration) {
 	c.mu.Lock()
-	c.manualOverrides[fanID] = percent
+	ov := manualOverride{percent: percent}
+	if duration > 0 {
+		ov.expiresAt = time.Now().Add(duration)
+	}
+	c.manualOverrides[fanID] = ov
 	c.mu.Unlock()
 }
 
-// ClearManualOverride removes a manual override for a fan
+// ClearManualOverride removes a manual override for a fan, returning it to
+// automatic (profile) control on the next control cycle.
 func (c *FanController) ClearManualOverride(fanID uint) {
 	c.mu.Lock()
 	delete(c.manualOverrides, fanID)
 	c.mu.Unlock()
 }
 
-// HasManualOverride checks if a fan has a manual override
+// HasManualOverride reports whether a fan has an active (non-expired) override,
+// lazily removing an expired one.
 func (c *FanController) HasManualOverride(fanID uint) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ov, ok := c.manualOverrides[fanID]
+	if !ok {
+		return false
+	}
+	if !ov.expiresAt.IsZero() && time.Now().After(ov.expiresAt) {
+		delete(c.manualOverrides, fanID)
+		return false
+	}
+	return true
+}
+
+// GetZoneTarget returns the last commanded speed for a zone, if one exists.
+func (c *FanController) GetZoneTarget(zone int) (int, bool) {
 	c.mu.RLock()
-	_, ok := c.manualOverrides[fanID]
-	c.mu.RUnlock()
-	return ok
+	defer c.mu.RUnlock()
+	v, ok := c.lastSpeeds[zone]
+	return v, ok
 }
 
 // loadSettings loads settings from database
@@ -226,14 +255,6 @@ func (c *FanController) controlCycle(ctx context.Context) {
 	if c.warningEnabled && maxTemp >= c.warningTemp {
 		c.logger.LogTemperatureWarning("system", maxTemp, c.warningTemp)
 	}
-
-	// Get manual overrides
-	c.mu.RLock()
-	manualOverrides := make(map[uint]int)
-	for k, v := range c.manualOverrides {
-		manualOverrides[k] = v
-	}
-	c.mu.RUnlock()
 
 	// Load ALL active profiles (supports multiple simultaneous profiles)
 	var profiles []models.Profile

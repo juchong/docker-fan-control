@@ -27,6 +27,15 @@ type IPMIDriver interface {
 	CanDetect(ctx context.Context) bool
 }
 
+// FanReadingProvider is an optional driver capability. Drivers that can report
+// RPM and duty together, keyed by the same SensorID they emit from DetectFans,
+// implement it so IPMIService.GetFanReadings surfaces accurate duty without
+// guessing the id format. Legacy IPMI drivers don't implement it (they fall
+// back to the SDR-based path).
+type FanReadingProvider interface {
+	GetFanReadings(ctx context.Context) (map[string]FanReading, error)
+}
+
 // DriverCapabilities describes what features a driver supports
 type DriverCapabilities struct {
 	SupportsManualMode       bool

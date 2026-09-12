@@ -398,7 +398,6 @@ func (v *ProfileValidator) validateZones(zones []int) error {
 		}
 	}
 
-	caps := driver.GetCapabilities()
 	zoneLayout := driver.GetZoneLayout()
 
 	// Check if custom zone layout is configured
@@ -406,27 +405,9 @@ func (v *ProfileValidator) validateZones(zones []int) error {
 		zoneLayout = *customLayout
 	}
 
-	// Check if zones exceed driver capabilities
-	maxZone := 0
-	for _, zone := range zones {
-		if zone < 0 {
-			return &ValidationError{
-				Field:   "zones",
-				Message: "zone IDs must be >= 0",
-			}
-		}
-		if zone >= caps.MaxZones {
-			return &ValidationError{
-				Field:   "zones",
-				Message: fmt.Sprintf("zone %d exceeds driver max zones (%d)", zone, caps.MaxZones),
-			}
-		}
-		if zone > maxZone {
-				maxZone = zone
-		}
-	}
-
-	// Check if all specified zones exist in the layout
+	// Zone IDs are driver-defined and need not form a 0..MaxZones-1 range (the
+	// hwmon driver uses the PWM channel number), so validate purely by
+	// membership in the layout rather than a numeric range.
 	validZones := make(map[int]bool)
 	for _, z := range zoneLayout.Zones {
 		validZones[z.ID] = true
@@ -436,7 +417,7 @@ func (v *ProfileValidator) validateZones(zones []int) error {
 		if !validZones[zone] {
 			return &ValidationError{
 				Field:   "zones",
-				Message: fmt.Sprintf("zone %d does not exist in driver layout", zone),
+				Message: fmt.Sprintf("zone %d does not exist in the driver's zone layout", zone),
 			}
 		}
 	}

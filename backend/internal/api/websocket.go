@@ -219,12 +219,18 @@ func (h *WebSocketHandler) gatherMetrics() *models.Monitoring {
 			IPMISensorID:   fan.IPMISensorID,
 			Label:          fan.DisplayName(),
 			IPMIZone:       fan.IPMIZone,
+			Channel:        fan.Channel,
 			ManualOverride: h.controller.HasManualOverride(fan.ID),
 		}
 
 		if reading, ok := readings[fan.IPMISensorID]; ok {
 			status.CurrentRPM = reading.RPM
 			status.CurrentDuty = reading.DutyCycle
+		}
+		if fan.IPMIZone != nil {
+			if t, ok := h.controller.GetZoneTarget(*fan.IPMIZone); ok {
+				status.TargetPercent = &t
+			}
 		}
 
 		monitoring.Fans = append(monitoring.Fans, status)

@@ -73,7 +73,7 @@ func (h *MonitoringHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 
 	// Get fan status
 	fans, _ := h.fans.List(r.Context())
-	speeds, _ := h.ipmi.GetFanSpeeds(r.Context())
+	readings, _ := h.ipmi.GetFanReadings(r.Context())
 
 	for _, fan := range fans {
 		status := models.FanStatus{
@@ -81,11 +81,18 @@ func (h *MonitoringHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 			IPMISensorID:   fan.IPMISensorID,
 			Label:          fan.DisplayName(),
 			IPMIZone:       fan.IPMIZone,
+			Channel:        fan.Channel,
 			ManualOverride: h.controller.HasManualOverride(fan.ID),
 		}
 
-		if rpm, ok := speeds[fan.IPMISensorID]; ok {
-			status.CurrentRPM = rpm
+		if rd, ok := readings[fan.IPMISensorID]; ok {
+			status.CurrentRPM = rd.RPM
+			status.CurrentDuty = rd.DutyCycle
+		}
+		if fan.IPMIZone != nil {
+			if t, ok := h.controller.GetZoneTarget(*fan.IPMIZone); ok {
+				status.TargetPercent = &t
+			}
 		}
 
 		monitoring.Fans = append(monitoring.Fans, status)
@@ -124,7 +131,7 @@ func (h *MonitoringHandler) GetFanStatus(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	speeds, _ := h.ipmi.GetFanSpeeds(r.Context())
+	readings, _ := h.ipmi.GetFanReadings(r.Context())
 
 	var response []models.FanStatus
 	for _, fan := range fans {
@@ -133,11 +140,18 @@ func (h *MonitoringHandler) GetFanStatus(w http.ResponseWriter, r *http.Request)
 			IPMISensorID:   fan.IPMISensorID,
 			Label:          fan.DisplayName(),
 			IPMIZone:       fan.IPMIZone,
+			Channel:        fan.Channel,
 			ManualOverride: h.controller.HasManualOverride(fan.ID),
 		}
 
-		if rpm, ok := speeds[fan.IPMISensorID]; ok {
-			status.CurrentRPM = rpm
+		if rd, ok := readings[fan.IPMISensorID]; ok {
+			status.CurrentRPM = rd.RPM
+			status.CurrentDuty = rd.DutyCycle
+		}
+		if fan.IPMIZone != nil {
+			if t, ok := h.controller.GetZoneTarget(*fan.IPMIZone); ok {
+				status.TargetPercent = &t
+			}
 		}
 
 		response = append(response, status)
