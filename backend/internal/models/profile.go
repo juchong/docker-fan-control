@@ -130,6 +130,7 @@ const (
 	InputTypeCPUTemp   = "cpu_temp"
 	InputTypeCPULoad   = "cpu_load"
 	InputTypeDriveTemp = "drive_temp"
+	InputTypeBoardTemp = "board_temp" // motherboard/VRM/chipset temps (nct6xxx)
 )
 
 // Aggregation methods

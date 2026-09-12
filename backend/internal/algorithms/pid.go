@@ -75,16 +75,19 @@ func (p *PID) Calculate(temp float64) int {
 	// Proportional term
 	pTerm := p.Kp * err
 
-	// Integral term (with anti-windup)
-	p.integral += err
-	// Clamp integral to prevent windup
-	maxIntegral := float64(p.MaxSpeed-p.MinSpeed) / p.Ki
-	if p.integral > maxIntegral {
-		p.integral = maxIntegral
-	} else if p.integral < -maxIntegral {
-		p.integral = -maxIntegral
+	// Integral term (with anti-windup). Skip entirely when Ki==0 to avoid a
+	// divide-by-zero (+Inf) in the windup clamp and needless accumulation.
+	iTerm := 0.0
+	if p.Ki != 0 {
+		p.integral += err
+		maxIntegral := float64(p.MaxSpeed-p.MinSpeed) / p.Ki
+		if p.integral > maxIntegral {
+			p.integral = maxIntegral
+		} else if p.integral < -maxIntegral {
+			p.integral = -maxIntegral
+		}
+		iTerm = p.Ki * p.integral
 	}
-	iTerm := p.Ki * p.integral
 
 	// Derivative term (rate of change of temperature)
 	dTerm := 0.0
