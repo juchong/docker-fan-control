@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,34 +22,50 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// Validate origin to prevent cross-site WebSocket hijacking
+		// Exact-host origin check to prevent cross-site WebSocket hijacking. The
+		// previous strings.Contains(origin, "://"+host) accepted host.evil.com.
 		origin := r.Header.Get("Origin")
 		if origin == "" {
-			// Allow requests without Origin header (non-browser clients)
-			return true
+			return true // non-browser clients send no Origin
 		}
-		
-		// Allow same-origin requests
+		u, err := url.Parse(origin)
+		if err != nil || u.Host == "" {
+			return false
+		}
 		host := r.Host
 		if host == "" {
 			host = r.Header.Get("Host")
 		}
-		
-		// Check if origin matches host (same-origin)
-		// Origin format: scheme://host[:port]
-		// We compare the host portion
-		if strings.Contains(origin, "://"+host) {
+		if u.Host == host {
+			return true // same-origin
+		}
+		if hn := u.Hostname(); hn == "localhost" || hn == "127.0.0.1" {
 			return true
 		}
-		
-		// Allow localhost for development
-		if strings.Contains(origin, "://localhost") || strings.Contains(origin, "://127.0.0.1") {
-			return true
+		if allowed := os.Getenv("ALLOWED_ORIGINS"); allowed != "" {
+			for _, o := range strings.Split(allowed, ",") {
+				if strings.TrimSpace(o) == origin {
+					return true
+				}
+			}
 		}
-		
 		log.Warn().Str("origin", origin).Str("host", host).Msg("WebSocket origin validation failed")
 		return false
 	},
+}
+
+// wsConn serializes writes to a single WebSocket connection. Gorilla forbids
+// concurrent writes, and the read goroutine's replies (pong/subscribe) would
+// otherwise race the periodic write pump and panic.
+type wsConn struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (c *wsConn) writeJSON(v any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn.WriteJSON(v)
 }
 
 // WebSocketHandler handles WebSocket connections
@@ -81,6 +99,7 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	wc := &wsConn{conn: conn}
 
 	// Register client
 	h.mu.Lock()
@@ -96,7 +115,7 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	log.Debug().Str("remote", r.RemoteAddr).Msg("WebSocket client connected")
 
 	// Send initial data
-	h.sendMetrics(conn)
+	h.sendMetrics(wc)
 
 	// Start periodic updates
 	ticker := time.NewTicker(2 * time.Second)
@@ -118,7 +137,7 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Handle incoming commands
-			h.handleMessage(conn, message)
+			h.handleMessage(wc, message)
 		}
 	}()
 
@@ -128,13 +147,13 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		case <-done:
 			return
 		case <-ticker.C:
-			h.sendMetrics(conn)
+			h.sendMetrics(wc)
 		}
 	}
 }
 
 // handleMessage handles incoming WebSocket messages
-func (h *WebSocketHandler) handleMessage(conn *websocket.Conn, message []byte) {
+func (h *WebSocketHandler) handleMessage(wc *wsConn, message []byte) {
 	var msg struct {
 		Type string          `json:"type"`
 		Data json.RawMessage `json:"data"`
@@ -146,17 +165,17 @@ func (h *WebSocketHandler) handleMessage(conn *websocket.Conn, message []byte) {
 
 	switch msg.Type {
 	case "ping":
-		h.sendMessage(conn, "pong", nil)
+		h.sendMessage(wc, "pong", nil)
 	case "subscribe":
 		// Could implement topic-based subscriptions
-		h.sendMessage(conn, "subscribed", nil)
+		h.sendMessage(wc, "subscribed", nil)
 	}
 }
 
 // sendMetrics sends current metrics to a client
-func (h *WebSocketHandler) sendMetrics(conn *websocket.Conn) {
+func (h *WebSocketHandler) sendMetrics(wc *wsConn) {
 	data := h.gatherMetrics()
-	h.sendMessage(conn, "metrics", data)
+	h.sendMessage(wc, "metrics", data)
 }
 
 // gatherMetrics collects all monitoring data
@@ -239,8 +258,8 @@ func (h *WebSocketHandler) gatherMetrics() *models.Monitoring {
 	return monitoring
 }
 
-// sendMessage sends a typed message to a client
-func (h *WebSocketHandler) sendMessage(conn *websocket.Conn, msgType string, data any) {
+// sendMessage sends a typed message to a client (serialized per connection).
+func (h *WebSocketHandler) sendMessage(wc *wsConn, msgType string, data any) {
 	msg := struct {
 		Type      string `json:"type"`
 		Timestamp string `json:"timestamp"`
@@ -251,18 +270,8 @@ func (h *WebSocketHandler) sendMessage(conn *websocket.Conn, msgType string, dat
 		Data:      data,
 	}
 
-	if err := conn.WriteJSON(msg); err != nil {
+	if err := wc.writeJSON(msg); err != nil {
 		log.Debug().Err(err).Msg("WebSocket write error")
-	}
-}
-
-// Broadcast sends a message to all connected clients
-func (h *WebSocketHandler) Broadcast(msgType string, data any) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	for conn := range h.clients {
-		h.sendMessage(conn, msgType, data)
 	}
 }
 
