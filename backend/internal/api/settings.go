@@ -18,30 +18,6 @@ var ipmiHostRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.-]{0,253}[a-zA-Z0
 // ipmiUserRegex validates IPMI username (alphanumeric, underscores, hyphens)
 var ipmiUserRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
-// sanitizeSettingsRequest sanitizes settings request
-func sanitizeSettingsRequest(req models.UpdateSettingsRequest) models.UpdateSettingsRequest {
-	if req.IPMIHost != nil {
-		*req.IPMIHost = SanitizeInput(*req.IPMIHost)
-	}
-	if req.IPMIUser != nil {
-		*req.IPMIUser = SanitizeInput(*req.IPMIUser)
-	}
-	if req.IPMIPass != nil {
-		*req.IPMIPass = SanitizeInput(*req.IPMIPass)
-	}
-	if req.MotherboardVendor != nil {
-		*req.MotherboardVendor = SanitizeInput(*req.MotherboardVendor)
-	}
-	if req.MotherboardModel != nil {
-		*req.MotherboardModel = SanitizeInput(*req.MotherboardModel)
-	}
-	if req.MotherboardDriver != nil {
-		*req.MotherboardDriver = SanitizeInput(*req.MotherboardDriver)
-	}
-	
-	return req
-}
-
 // SettingsHandler handles settings endpoints
 type SettingsHandler struct {
 	ipmi       *services.IPMIService
@@ -73,9 +49,6 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	// Sanitize input
-	req = sanitizeSettingsRequest(req)
 
 	// Validate enum values
 	if req.IPMIMode != nil && *req.IPMIMode != "local" && *req.IPMIMode != "lan" {

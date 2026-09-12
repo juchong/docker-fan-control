@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"docker-fan-control/internal/models"
@@ -53,7 +54,7 @@ func (h *LogsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if search := r.URL.Query().Get("search"); search != "" {
 		// Sanitize search input - limit length and remove dangerous characters
-		sanitized := SanitizeInput(search)
+		sanitized := strings.TrimSpace(search)
 		if len(sanitized) > 100 {
 			sanitized = sanitized[:100]
 		}
@@ -118,7 +119,7 @@ func (h *LogsHandler) Export(w http.ResponseWriter, r *http.Request) {
 		query.Category = category
 	}
 	if search := r.URL.Query().Get("search"); search != "" {
-		sanitized := SanitizeInput(search)
+		sanitized := strings.TrimSpace(search)
 		if len(sanitized) > 100 {
 			sanitized = sanitized[:100]
 		}

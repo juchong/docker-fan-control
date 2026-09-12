@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"docker-fan-control/internal/models"
@@ -97,9 +98,9 @@ func (h *FansHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize and validate label
+	// Normalize and validate label (GORM parameterizes queries; no sanitizer needed)
 	if req.Label != nil {
-		sanitized := SanitizeInput(*req.Label)
+		sanitized := strings.TrimSpace(*req.Label)
 		if len(sanitized) > 64 {
 			http.Error(w, "Label must be at most 64 characters", http.StatusBadRequest)
 			return

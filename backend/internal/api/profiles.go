@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"docker-fan-control/internal/models"
 	"docker-fan-control/internal/services"
@@ -11,16 +12,15 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// sanitizeProfileRequest sanitizes profile request
-func sanitizeProfileRequest(req models.CreateProfileRequest) models.CreateProfileRequest {
-	req.Name = SanitizeInput(req.Name)
-	req.Description = SanitizeInput(req.Description)
-	
-	// Sanitize inputs
+// normalizeProfileRequest trims surrounding whitespace on free-text fields.
+// It deliberately does NOT strip/alter content: input types are lowercase enums
+// (e.g. "gpu_temp") validated downstream, and GORM parameterizes all queries.
+func normalizeProfileRequest(req models.CreateProfileRequest) models.CreateProfileRequest {
+	req.Name = strings.TrimSpace(req.Name)
+	req.Description = strings.TrimSpace(req.Description)
 	for i := range req.Inputs {
-		req.Inputs[i].InputType = SanitizeInput(req.Inputs[i].InputType)
+		req.Inputs[i].InputType = strings.TrimSpace(req.Inputs[i].InputType)
 	}
-	
 	return req
 }
 
@@ -77,8 +77,8 @@ func (h *ProfilesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize input
-	req = sanitizeProfileRequest(req)
+	// Normalize input
+	req = normalizeProfileRequest(req)
 
 	if req.Name == "" {
 		http.Error(w, "Name is required", http.StatusBadRequest)
@@ -172,7 +172,7 @@ func (h *ProfilesHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Sanitize and validate input
 	if req.Name != nil {
-		sanitized := SanitizeInput(*req.Name)
+		sanitized := strings.TrimSpace(*req.Name)
 		if sanitized == "" {
 			http.Error(w, "Name cannot be empty", http.StatusBadRequest)
 			return
@@ -184,7 +184,7 @@ func (h *ProfilesHandler) Update(w http.ResponseWriter, r *http.Request) {
 		req.Name = &sanitized
 	}
 	if req.Description != nil {
-		sanitized := SanitizeInput(*req.Description)
+		sanitized := strings.TrimSpace(*req.Description)
 		if len(sanitized) > 256 {
 			http.Error(w, "Description must be at most 256 characters", http.StatusBadRequest)
 			return

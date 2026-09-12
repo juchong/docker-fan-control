@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -189,63 +188,6 @@ func isStringParam(param string) bool {
 	return false
 }
 
-// SanitizeInput sanitizes user input
-func SanitizeInput(input string) string {
-	// Remove HTML tags
-	input = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(input, "")
-	
-	// Remove SQL injection patterns
-	input = regexp.MustCompile(`(?:\b(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|EXEC(UTE)?|DECLARE|UNION|ALL|AND|OR|NOT|HAVING|GROUP|BY|ORDER|LIMIT|OFFSET|AS|FROM|WHERE|LIKE|BETWEEN|IN|IS|NULL|JOIN|ON|TABLE|DATABASE|VIEW|INDEX|PROCEDURE|FUNCTION|TRIGGER|GRANT|REVOKE|COMMIT|ROLLBACK|BEGIN|END|CASE|WHEN|THEN|ELSE|END|WHILE|LOOP|RETURN|DECLARE|SET|VALUES|WITH|RECURSIVE)\b)`).ReplaceAllString(strings.ToUpper(input), "")
-	
-	// Remove XSS patterns
-	input = regexp.MustCompile(`(?:\b(?:SCRIPT|OBJECT|EMBED|APPLET|IFRAME|FRAME|META|LINK|STYLE|ON(ERROR|LOAD|CLICK|MOUSEOVER|MOUSEOUT|KEYDOWN|KEYUP|FOCUS|BLUR|CHANGE|SUBMIT|RESET|DBLCLICK|MOUSEDOWN|MOUSEUP|MOUSEMOVE|SELECT|UNLOAD|ABORT|BEFOREUNLOAD|HASHCHANGE|POPSTATE|RESIZE|SCROLL|STORAGE|MESSAGE|OFFLINE|ONLINE|OPEN|CLOSE|CONNECT|DISCONNECT|MESSAGE|ERROR|RELOAD|UNLOAD|READYSTATECHANGE|PAGESHOW|PAGEHIDE|BEFOREPRINT|AFTERPRINT|UNLOAD|ABORT|ERROR|LOAD|PROGRESS|LOADEDDATA|LOADEDMETADATA|CANPLAY|CANPLAYTHROUGH|DURATIONCHANGE|EMPTIED|ENDED|LOADESTART|PAUSED|PLAY|PLAYING|RATECHANGE|SEEKED|SEEKING|STALLED|SUSPEND|TIMEUPDATE|VOLUMECHANGE|WAITING)\b)`).ReplaceAllString(strings.ToUpper(input), "")
-	
-	// Trim whitespace
-	input = strings.TrimSpace(input)
-	
-	return input
-}
-
-// SanitizeJSONInput sanitizes JSON input
-func SanitizeJSONInput(input map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
-	
-	for key, value := range input {
-		switch v := value.(type) {
-		case string:
-			result[key] = SanitizeInput(v)
-		case map[string]interface{}:
-			result[key] = SanitizeJSONInput(v)
-		case []interface{}:
-			result[key] = sanitizeJSONArray(v)
-		default:
-			result[key] = value
-		}
-	}
-	
-	return result
-}
-
-// sanitizeJSONArray sanitizes JSON array
-func sanitizeJSONArray(arr []interface{}) []interface{} {
-	result := make([]interface{}, len(arr))
-	
-	for i, value := range arr {
-		switch v := value.(type) {
-		case string:
-			result[i] = SanitizeInput(v)
-		case map[string]interface{}:
-			result[i] = SanitizeJSONInput(v)
-		case []interface{}:
-			result[i] = sanitizeJSONArray(v)
-		default:
-			result[i] = value
-		}
-	}
-	
-	return result
-}
-
 // RateLimiterMiddleware creates rate limiting middleware
 func RateLimiterMiddleware(authSvc *services.AuthService) func(next http.Handler) http.Handler {
 	store := memory.NewStore()
@@ -343,23 +285,30 @@ func extractUserFromRequest(r *http.Request, authSvc *services.AuthService) (*mo
 
 // isSensitiveOperation checks if request is a sensitive operation
 func isSensitiveOperation(r *http.Request) bool {
-	sensitivePaths := []string{
+	// Prefix matches for fixed paths.
+	sensitivePrefixes := []string{
 		"/api/auth/login",
 		"/api/auth/password",
 		"/api/auth/refresh",
 		"/api/users",
 		"/api/fans/detect",
-		"/api/fans/{id}/speed",
 		"/api/controller/start",
 		"/api/controller/stop",
 	}
-	
-	for _, path := range sensitivePaths {
+	for _, path := range sensitivePrefixes {
 		if strings.HasPrefix(r.URL.Path, path) {
 			return true
 		}
 	}
-	
+
+	// Per-fan mutating actions carry an {id} segment, so match by suffix
+	// (the literal "/api/fans/{id}/speed" never matched a real path like
+	// "/api/fans/5/speed").
+	if strings.HasPrefix(r.URL.Path, "/api/fans/") &&
+		(strings.HasSuffix(r.URL.Path, "/speed") || strings.HasSuffix(r.URL.Path, "/identify")) {
+		return true
+	}
+
 	return false
 }
 

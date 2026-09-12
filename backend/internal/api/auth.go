@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"docker-fan-control/internal/config"
 	"docker-fan-control/internal/models"
@@ -173,9 +174,10 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize input
-	req.Username = SanitizeInput(req.Username)
-	// Don't sanitize password as it may contain special characters needed for complexity
+	// Trim username only. Do NOT alter case/content: usernames are validated by
+	// regex below and looked up case-sensitively at login; the password must pass
+	// through untouched for complexity rules.
+	req.Username = strings.TrimSpace(req.Username)
 
 	if req.Username == "" || req.Password == "" {
 		http.Error(w, "Username and password are required", http.StatusBadRequest)

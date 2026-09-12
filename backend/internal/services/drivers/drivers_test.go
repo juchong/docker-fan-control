@@ -109,8 +109,6 @@ func TestGenericDriver_CanDetect(t *testing.T) {
 
 // TestDriverCapabilities tests that drivers report correct capabilities
 func TestDriverCapabilities(t *testing.T) {
-	ctx := context.Background()
-	
 	// ASRock capabilities
 	asrock := NewASRockDriver(new(MockIPMIExecutor))
 	caps := asrock.GetCapabilities()
@@ -154,8 +152,6 @@ func TestDriverCapabilities(t *testing.T) {
 
 // TestZoneLayout tests that drivers have correct zone layouts
 func TestZoneLayout(t *testing.T) {
-	ctx := context.Background()
-	
 	// ASRock zone layout
 	asrock := NewASRockDriver(new(MockIPMIExecutor))
 	layout := asrock.GetZoneLayout()

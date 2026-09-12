@@ -80,7 +80,7 @@ func (a *AlgorithmParams) Scan(value any) error {
 // Value implements driver.Valuer for AlgorithmParams
 func (a AlgorithmParams) Value() (driver.Value, error) {
 	if a == nil {
-		return "{}}", nil
+		return "{}", nil
 	}
 	return json.Marshal(a)
 }

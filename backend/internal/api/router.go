@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 
 	"docker-fan-control/internal/config"
@@ -47,24 +49,46 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 	// Session timeout
 	r.Use(SessionTimeoutMiddleware(svc.Auth, cfg.Auth.SessionTimeout))
 
-	// CORS - AllowOriginFunc validates origins dynamically
+	// Optional explicit allow-list (comma-separated absolute origins).
+	var allowedOrigins []string
+	if v := os.Getenv("ALLOWED_ORIGINS"); v != "" {
+		for _, o := range strings.Split(v, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				allowedOrigins = append(allowedOrigins, o)
+			}
+		}
+	}
+
+	// CORS - exact-host matching (the previous strings.Contains check accepted
+	// e.g. https://host.evil.com because it contains "://host"). Same-origin and
+	// localhost are always allowed so the live deployment keeps working.
 	r.Use(cors.Handler(cors.Options{
-		AllowOriginFunc: func(r *http.Request, origin string) bool {
-			// Allow requests without Origin header (non-browser clients)
+		AllowOriginFunc: func(req *http.Request, origin string) bool {
+			// Non-browser clients send no Origin header.
 			if origin == "" {
 				return true
 			}
-			// Allow same-origin requests
-			host := r.Host
+			u, err := url.Parse(origin)
+			if err != nil || u.Host == "" {
+				return false
+			}
+			// Same-origin (exact host[:port] match against the request Host).
+			host := req.Host
 			if host == "" {
-				host = r.Header.Get("Host")
+				host = req.Header.Get("Host")
 			}
-			if strings.Contains(origin, "://"+host) {
+			if u.Host == host {
 				return true
 			}
-			// Allow localhost for development
-			if strings.Contains(origin, "://localhost") || strings.Contains(origin, "://127.0.0.1") {
+			// Localhost for development.
+			if hn := u.Hostname(); hn == "localhost" || hn == "127.0.0.1" {
 				return true
+			}
+			// Explicit allow-list.
+			for _, allowed := range allowedOrigins {
+				if origin == allowed {
+					return true
+				}
 			}
 			return false
 		},

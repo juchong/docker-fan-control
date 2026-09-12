@@ -48,9 +48,13 @@ func NewAuthService(cfg *config.AuthConfig) *AuthService {
 	}
 }
 
-// dummyHash is a bcrypt hash used to prevent timing attacks on user enumeration
-// This ensures login takes similar time whether the user exists or not
-var dummyHash = []byte("$2a$10$dummyhashtopreventtimingattacksonuserenumeration")
+// dummyHash is a VALID 60-char bcrypt hash (cost 10) used to prevent timing
+// attacks on user enumeration: bcrypt.CompareHashAndPassword must run the full
+// hash for a non-existent user just as it does for a real one. The previous
+// value was only 55 chars, so bcrypt returned ErrHashTooShort immediately and
+// the timing defense did nothing. This hash is of a random string; it will
+// never match a real password.
+var dummyHash = []byte("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy")
 
 // Login validates credentials and returns a JWT token
 func (s *AuthService) Login(ctx context.Context, username, password string) (*models.LoginResponse, error) {

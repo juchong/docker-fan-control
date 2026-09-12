@@ -30,6 +30,12 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
+	// Refuse to start with the default JWT secret when auth is enabled: a known
+	// secret lets anyone forge valid tokens. Set a strong AUTH_JWT_SECRET.
+	if cfg.Auth.Enabled && string(cfg.Auth.JWTSecret) == "change-me-in-production" {
+		log.Fatal().Msg("AUTH_JWT_SECRET is unset or left at the default; refusing to start with auth enabled")
+	}
+
 	// Initialize database
 	if err := database.Init(cfg.Data.Path); err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize database")
