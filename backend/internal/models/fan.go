@@ -12,8 +12,6 @@ type Fan struct {
 	Channel      *int      `json:"channel,omitempty" gorm:"column:channel"`             // hardware PWM channel (telemetry/display only)
 	Label        string    `json:"label,omitempty"`                                      // User-defined label
 	DetectedName string    `json:"detected_name,omitempty" gorm:"column:detected_name"`  // Auto-detected name
-	MinRPM       *int      `json:"min_rpm,omitempty" gorm:"column:min_rpm"`              // Observed minimum RPM
-	MaxRPM       *int      `json:"max_rpm,omitempty" gorm:"column:max_rpm"`              // Observed maximum RPM
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

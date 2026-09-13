@@ -5,8 +5,6 @@ export interface Fan {
   channel?: number;
   label?: string;
   detected_name?: string;
-  min_rpm?: number;
-  max_rpm?: number;
   created_at: string;
   updated_at: string;
 }
