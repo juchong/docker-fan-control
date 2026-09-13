@@ -3,11 +3,13 @@ import { Monitoring } from '../types/monitoring';
 
 export interface MetricSample {
   t: number; // epoch ms
-  gpu: number | null;
-  cpu: number | null;
-  drive: number | null;
-  board: number | null;
+  gpu: number | null; // max GPU temp °C
+  cpu: number | null; // max CPU temp °C
+  drive: number | null; // max drive temp °C
+  board: number | null; // max board temp °C
   duty: number | null; // max fan duty %
+  gpuLoad: number | null; // max GPU load %
+  cpuLoad: number | null; // system CPU load %
 }
 
 const MAX_POINTS = 240; // ~6 min at a 1.5s cadence
@@ -67,6 +69,8 @@ export function recordSample(m: Monitoring | null) {
     drive: max((m.system?.drives ?? []).map((d) => d.temperature)),
     board: max((m.system?.board_temps ?? []).map((b) => b.temperature)),
     duty: max((m.fans ?? []).map((f) => f.current_duty)),
+    gpuLoad: max((m.gpus ?? []).map((g) => g.load)),
+    cpuLoad: typeof m.system?.cpu_load === 'number' ? m.system.cpu_load : null,
   };
 
   buffer = [...buffer, sample].slice(-MAX_POINTS);

@@ -11,15 +11,17 @@ import {
 } from 'recharts';
 import { MetricSample } from '../../hooks/useMetricsHistory';
 
+type Variant = 'temp' | 'load';
+
 interface SeriesDef {
   key: keyof Omit<MetricSample, 't'>;
   name: string;
   color: string;
-  axis: 'temp' | 'duty';
+  axis: 'temp' | 'duty' | 'pct';
   dashed?: boolean;
 }
 
-const SERIES: SeriesDef[] = [
+const TEMP_SERIES: SeriesDef[] = [
   { key: 'gpu', name: 'GPU', color: 'rgb(var(--c-danger))', axis: 'temp' },
   { key: 'cpu', name: 'CPU', color: 'rgb(var(--c-info))', axis: 'temp' },
   { key: 'drive', name: 'Drive', color: '#22d3ee', axis: 'temp' },
@@ -27,29 +29,43 @@ const SERIES: SeriesDef[] = [
   { key: 'duty', name: 'Fan duty', color: 'rgb(var(--c-ok))', axis: 'duty', dashed: true },
 ];
 
+const LOAD_SERIES: SeriesDef[] = [
+  { key: 'gpuLoad', name: 'GPU load', color: 'rgb(var(--c-info))', axis: 'pct' },
+  { key: 'cpuLoad', name: 'CPU load', color: '#a78bfa', axis: 'pct' },
+  { key: 'duty', name: 'Fan duty', color: 'rgb(var(--c-ok))', axis: 'pct', dashed: true },
+];
+
 function fmtTime(t: number): string {
   const d = new Date(t);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-// Temperature + fan-duty time series, backed by the client metric history
-// ring buffer. Essential for tuning PID/curve response.
-export default function TimeSeriesPanel({ history }: { history: MetricSample[] }) {
-  const data = useMemo(
-    () => history.map((s) => ({ ...s, time: fmtTime(s.t) })),
-    [history]
-  );
+// Time-series of either temperatures (dual axis: °C + fan-duty %) or compute
+// load (single % axis shared with fan duty), backed by the client metric
+// history ring buffer. Useful for seeing how fans respond to heat / load.
+export default function TimeSeriesPanel({
+  history,
+  variant = 'temp',
+}: {
+  history: MetricSample[];
+  variant?: Variant;
+}) {
+  const data = useMemo(() => history.map((s) => ({ ...s, time: fmtTime(s.t) })), [history]);
 
+  const allSeries = variant === 'load' ? LOAD_SERIES : TEMP_SERIES;
   // Only plot series that actually have data.
   const activeSeries = useMemo(
-    () => SERIES.filter((s) => history.some((h) => h[s.key] != null)),
-    [history]
+    () => allSeries.filter((s) => history.some((h) => h[s.key] != null)),
+    [allSeries, history]
   );
 
   if (history.length < 3) {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-2 text-sm text-muted">
-        <span className="inline-block w-5 h-5 border-2 border-line border-t-primary-500 rounded-full animate-spin" aria-hidden="true" />
+        <span
+          className="inline-block w-5 h-5 border-2 border-line border-t-primary-500 rounded-full animate-spin"
+          aria-hidden="true"
+        />
         Collecting live data… the chart fills in over the next few seconds.
       </div>
     );
@@ -69,29 +85,43 @@ export default function TimeSeriesPanel({ history }: { history: MetricSample[] }
             stroke={axisColor}
             minTickGap={48}
           />
-          <YAxis
-            yAxisId="temp"
-            tick={{ fill: axisColor, fontSize: 11 }}
-            stroke={axisColor}
-            width={40}
-            allowDecimals={false}
-            // Round to 10°C steps with padding so the axis holds steady instead
-            // of rescaling on every new sample.
-            domain={[
-              (min: number) => Math.max(0, Math.floor((min - 5) / 10) * 10),
-              (max: number) => Math.ceil((max + 5) / 10) * 10,
-            ]}
-            unit="°"
-          />
-          <YAxis
-            yAxisId="duty"
-            orientation="right"
-            tick={{ fill: axisColor, fontSize: 11 }}
-            stroke={axisColor}
-            width={40}
-            domain={[0, 100]}
-            unit="%"
-          />
+
+          {variant === 'temp' ? (
+            <>
+              <YAxis
+                yAxisId="temp"
+                tick={{ fill: axisColor, fontSize: 11 }}
+                stroke={axisColor}
+                width={40}
+                allowDecimals={false}
+                // Round to 10°C steps with padding so the axis holds steady.
+                domain={[
+                  (min: number) => Math.max(0, Math.floor((min - 5) / 10) * 10),
+                  (max: number) => Math.ceil((max + 5) / 10) * 10,
+                ]}
+                unit="°"
+              />
+              <YAxis
+                yAxisId="duty"
+                orientation="right"
+                tick={{ fill: axisColor, fontSize: 11 }}
+                stroke={axisColor}
+                width={40}
+                domain={[0, 100]}
+                unit="%"
+              />
+            </>
+          ) : (
+            <YAxis
+              yAxisId="pct"
+              tick={{ fill: axisColor, fontSize: 11 }}
+              stroke={axisColor}
+              width={40}
+              domain={[0, 100]}
+              unit="%"
+            />
+          )}
+
           <Tooltip
             contentStyle={{
               background: 'rgb(var(--c-surface))',

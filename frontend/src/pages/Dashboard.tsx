@@ -261,13 +261,23 @@ export function Dashboard() {
       </div>
 
       {/* Time series */}
-      <Card title="Temperature & Fan Duty">
+      <Card title="Temperature vs. Fan Duty">
         <Suspense
           fallback={
             <div className="h-64 flex items-center justify-center text-sm text-muted">Loading chart…</div>
           }
         >
-          <TimeSeriesPanel history={history} />
+          <TimeSeriesPanel history={history} variant="temp" />
+        </Suspense>
+      </Card>
+
+      <Card title="CPU/GPU Load vs Fan Duty">
+        <Suspense
+          fallback={
+            <div className="h-64 flex items-center justify-center text-sm text-muted">Loading chart…</div>
+          }
+        >
+          <TimeSeriesPanel history={history} variant="load" />
         </Suspense>
       </Card>
 
