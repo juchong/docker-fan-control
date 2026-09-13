@@ -9,6 +9,7 @@ import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../components/common/Toast';
+import { HelpTip } from '../components/common/HelpTip';
 import {
   ProfileSummary, Profile, ProfileInput, LinearParams, StepParams, PIDParams,
   AlgorithmParams, InputAggregation,
@@ -249,6 +250,59 @@ function InputGroup({ title, icon: Icon, iconColor, children, defaultExpanded = 
   );
 }
 
+// Field help text. Bounds mirror the backend ProfileValidator exactly.
+const HELP = {
+  name: 'A short label for this profile. Required, up to 100 characters.',
+  algorithm:
+    'How the target fan speed is computed from temperature. Linear: a straight ramp between two temp/speed points. Step: explicit temp→speed steps you define. PID: closed-loop control that holds a target temperature.',
+  priority:
+    'When two active profiles target the same zone, the HIGHER number wins — 0 is the lowest. Ties break to the higher speed, for safety. Must be an integer ≥ 0; negative values are rejected.',
+  description: 'Optional notes about this profile. Up to 255 characters.',
+  minTemp: 'Temperature at/below which the fan runs at Min Speed. 0–150 °C, and must be below Max Temp.',
+  maxTemp: 'Temperature at/above which the fan runs at Max Speed. 0–150 °C, and must be above Min Temp.',
+  minSpeed: 'Fan duty at/below Min Temp. 0–100 %, and must be below Max Speed.',
+  maxSpeed: 'Fan duty at/above Max Temp. 0–100 %, and must be above Min Speed.',
+  setpoint: 'PID target temperature to hold. 0–150 °C.',
+  kp: 'PID proportional gain — reaction to the current error. Must be ≥ 0.',
+  ki: 'PID integral gain — removes steady-state offset over time. Must be ≥ 0, and should be ≤ Kp for stability.',
+  kd: 'PID derivative gain — damps overshoot by reacting to how fast the error changes. Must be ≥ 0.',
+  pidMinSpeed: 'Lower clamp on the PID output duty. 0–100 %, and below Max Speed.',
+  pidMaxSpeed: 'Upper clamp on the PID output duty. 0–100 %, and above Min Speed.',
+  combine:
+    'How multiple inputs collapse to one value. Max: respond to the hottest (safest, default). Min: all must be cool. Average: the mean. Weighted: weighted average using each input’s weight.',
+  weight: 'Relative importance of this input. Only used when Combine = Weighted average. Must be greater than 0.',
+  steps: 'Each row maps a temperature to a fan duty; the controller interpolates between rows. Temps 0–150 °C, speeds 0–100 %.',
+  zones:
+    'A control zone is a fan output the controller drives together. This board exposes one zone per fan header, so each fan is its own zone — choose which ones this profile controls. At least one is required.',
+  transition:
+    'Caps how fast the commanded duty may change: seconds to go 0→100 %. Larger is gentler. 0–300 s. Only applies when Smooth transitions is on.',
+  minRun:
+    'After the fan changes speed, hold it at least this long before changing again — stops constant up/down hunting. 0–300 s.',
+  hysteresis:
+    'Dead-band around the target: the speed won’t change until the temperature moves more than this. Reduces oscillation. 0–10 °C.',
+  smooth: 'Ramp toward the target duty over the Transition time instead of jumping to it instantly.',
+};
+
+// Label paired with an inline (?) help tooltip.
+function Lbl({
+  children,
+  help,
+  htmlFor,
+}: {
+  children: React.ReactNode;
+  help?: string;
+  htmlFor?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1 mb-1">
+      <label htmlFor={htmlFor} className="block text-sm font-medium text-fg-3">
+        {children}
+      </label>
+      {help && <HelpTip text={help} label={typeof children === 'string' ? children : undefined} />}
+    </div>
+  );
+}
+
 function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: ProfileEditorProps) {
   const { data: monitoring } = useMonitoring();
   const gpuCount = monitoring?.gpus?.length || 0;
@@ -407,21 +461,34 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
   // Client-side validation mirroring the backend.
   const validationError = useMemo((): string | null => {
     if (!name.trim()) return 'Name is required';
+    if (name.length > 100) return 'Name must be 100 characters or fewer';
+    if (priority < 0) return 'Priority must be ≥ 0';
     if (selectedZones.length === 0) return 'Select at least one target zone';
     if (algorithm === 'linear') {
+      if ([linearParams.min_temp, linearParams.max_temp].some((t) => t < 0 || t > 150)) return 'Temps must be 0–150 °C';
+      if ([linearParams.min_speed, linearParams.max_speed].some((s) => s < 0 || s > 100)) return 'Speeds must be 0–100 %';
       if (linearParams.min_temp >= linearParams.max_temp) return 'Min temp must be below max temp';
       if (linearParams.min_speed > linearParams.max_speed) return 'Min speed must be ≤ max speed';
-      if ([linearParams.min_speed, linearParams.max_speed].some((s) => s < 0 || s > 100)) return 'Speeds must be 0–100%';
+    }
+    if (algorithm === 'step') {
+      if (stepParams.steps.some((s) => s.temp < 0 || s.temp > 150)) return 'Step temps must be 0–150 °C';
+      if (stepParams.steps.some((s) => s.speed < 0 || s.speed > 100)) return 'Step speeds must be 0–100 %';
     }
     if (algorithm === 'pid') {
-      if (pidParams.ki < 0 || pidParams.kd < 0) return 'PID gains must be ≥ 0';
+      if (pidParams.setpoint < 0 || pidParams.setpoint > 150) return 'Target temp must be 0–150 °C';
+      if (pidParams.kp < 0 || pidParams.ki < 0 || pidParams.kd < 0) return 'PID gains must be ≥ 0';
+      if (pidParams.ki > pidParams.kp) return 'Ki should be ≤ Kp for stability';
+      if ([pidParams.min_speed, pidParams.max_speed].some((s) => s < 0 || s > 100)) return 'Speeds must be 0–100 %';
       if (pidParams.min_speed > pidParams.max_speed) return 'Min speed must be ≤ max speed';
     }
-    if (transitionTime < 0 || transitionTime > 300) return 'Transition time must be 0–300s';
-    if (minRunTime < 0 || minRunTime > 300) return 'Min run time must be 0–300s';
-    if (hysteresis < 0 || hysteresis > 10) return 'Hysteresis must be 0–10°C';
+    if (inputAggregation === 'weighted' && selectedInputs.some((i) => (i.weight ?? 0) <= 0)) {
+      return 'Weights must be greater than 0';
+    }
+    if (transitionTime < 0 || transitionTime > 300) return 'Transition time must be 0–300 s';
+    if (minRunTime < 0 || minRunTime > 300) return 'Min run time must be 0–300 s';
+    if (hysteresis < 0 || hysteresis > 10) return 'Hysteresis must be 0–10 °C';
     return null;
-  }, [name, selectedZones, algorithm, linearParams, pidParams, transitionTime, minRunTime, hysteresis]);
+  }, [name, priority, selectedZones, algorithm, linearParams, stepParams, pidParams, inputAggregation, selectedInputs, transitionTime, minRunTime, hysteresis]);
 
   const handleSave = () => {
     let algorithmParams: Record<string, unknown>;
@@ -443,11 +510,11 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
         {/* Basic Info */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="sm:col-span-1">
-            <label className="input-label">Name</label>
-            <input type="text" className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Gaming" />
+            <Lbl help={HELP.name}>Name</Lbl>
+            <input type="text" className="input" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Gaming" />
           </div>
           <div>
-            <label className="input-label">Algorithm</label>
+            <Lbl help={HELP.algorithm}>Algorithm</Lbl>
             <select className="select" value={algorithm} onChange={(e) => setAlgorithm(e.target.value as 'linear' | 'step' | 'pid')}>
               <option value="linear">Linear</option>
               <option value="step">Step</option>
@@ -455,14 +522,14 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
             </select>
           </div>
           <div>
-            <label className="input-label">Priority</label>
-            <input type="number" className="input" value={priority} onChange={(e) => setPriority(parseInt(e.target.value) || 0)} />
+            <Lbl help={HELP.priority}>Priority</Lbl>
+            <input type="number" className="input" min={0} step={1} value={priority} onChange={(e) => setPriority(Math.max(0, parseInt(e.target.value) || 0))} />
           </div>
         </div>
 
         <div>
-          <label className="input-label">Description</label>
-          <input type="text" className="input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" />
+          <Lbl help={HELP.description}>Description</Lbl>
+          <input type="text" className="input" maxLength={255} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" />
         </div>
 
         {/* Algorithm Settings + curve preview */}
@@ -471,27 +538,31 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
             <h4 className="font-medium text-fg-2 mb-3">Algorithm Settings</h4>
             {algorithm === 'linear' && (
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="input-label">Min Temp (°C)</label>
-                  <input type="number" className="input" value={linearParams.min_temp}
+                <div><Lbl help={HELP.minTemp}>Min Temp (°C)</Lbl>
+                  <input type="number" className="input" min={0} max={150} value={linearParams.min_temp}
                     onChange={(e) => setLinearParams({ ...linearParams, min_temp: parseFloat(e.target.value) || 0 })} /></div>
-                <div><label className="input-label">Max Temp (°C)</label>
-                  <input type="number" className="input" value={linearParams.max_temp}
+                <div><Lbl help={HELP.maxTemp}>Max Temp (°C)</Lbl>
+                  <input type="number" className="input" min={0} max={150} value={linearParams.max_temp}
                     onChange={(e) => setLinearParams({ ...linearParams, max_temp: parseFloat(e.target.value) || 0 })} /></div>
-                <div><label className="input-label">Min Speed (%)</label>
-                  <input type="number" className="input" value={linearParams.min_speed}
+                <div><Lbl help={HELP.minSpeed}>Min Speed (%)</Lbl>
+                  <input type="number" className="input" min={0} max={100} value={linearParams.min_speed}
                     onChange={(e) => setLinearParams({ ...linearParams, min_speed: parseInt(e.target.value) || 0 })} /></div>
-                <div><label className="input-label">Max Speed (%)</label>
-                  <input type="number" className="input" value={linearParams.max_speed}
+                <div><Lbl help={HELP.maxSpeed}>Max Speed (%)</Lbl>
+                  <input type="number" className="input" min={0} max={100} value={linearParams.max_speed}
                     onChange={(e) => setLinearParams({ ...linearParams, max_speed: parseInt(e.target.value) || 0 })} /></div>
               </div>
             )}
             {algorithm === 'step' && (
               <div className="space-y-2">
+                <div className="flex items-center gap-1 text-xs text-muted">
+                  <span>Temp → speed steps</span>
+                  <HelpTip text={HELP.steps} label="Step table" />
+                </div>
                 {stepParams.steps.map((step, i) => (
                   <div key={i} className="flex gap-2 items-center">
-                    <input type="number" className="input w-20" value={step.temp} onChange={(e) => updateStep(i, 'temp', parseFloat(e.target.value) || 0)} />
+                    <input type="number" className="input w-20" min={0} max={150} value={step.temp} onChange={(e) => updateStep(i, 'temp', parseFloat(e.target.value) || 0)} />
                     <span className="text-muted">°C →</span>
-                    <input type="number" className="input w-20" value={step.speed} onChange={(e) => updateStep(i, 'speed', parseInt(e.target.value) || 0)} />
+                    <input type="number" className="input w-20" min={0} max={100} value={step.speed} onChange={(e) => updateStep(i, 'speed', parseInt(e.target.value) || 0)} />
                     <span className="text-muted">%</span>
                     <Button variant="danger" size="sm" onClick={() => removeStep(i)} disabled={stepParams.steps.length <= 1}>
                       <Trash2 className="w-4 h-4" />
@@ -503,18 +574,18 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
             )}
             {algorithm === 'pid' && (
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="input-label">Target Temp (°C)</label>
-                  <input type="number" className="input" value={pidParams.setpoint} onChange={(e) => setPidParams({ ...pidParams, setpoint: parseFloat(e.target.value) || 0 })} /></div>
-                <div><label className="input-label">Kp</label>
-                  <input type="number" step="0.1" className="input" value={pidParams.kp} onChange={(e) => setPidParams({ ...pidParams, kp: parseFloat(e.target.value) || 0 })} /></div>
-                <div><label className="input-label">Ki</label>
-                  <input type="number" step="0.01" className="input" value={pidParams.ki} onChange={(e) => setPidParams({ ...pidParams, ki: parseFloat(e.target.value) || 0 })} /></div>
-                <div><label className="input-label">Kd</label>
-                  <input type="number" step="0.1" className="input" value={pidParams.kd} onChange={(e) => setPidParams({ ...pidParams, kd: parseFloat(e.target.value) || 0 })} /></div>
-                <div><label className="input-label">Min Speed (%)</label>
-                  <input type="number" className="input" value={pidParams.min_speed} onChange={(e) => setPidParams({ ...pidParams, min_speed: parseInt(e.target.value) || 0 })} /></div>
-                <div><label className="input-label">Max Speed (%)</label>
-                  <input type="number" className="input" value={pidParams.max_speed} onChange={(e) => setPidParams({ ...pidParams, max_speed: parseInt(e.target.value) || 0 })} /></div>
+                <div><Lbl help={HELP.setpoint}>Target Temp (°C)</Lbl>
+                  <input type="number" className="input" min={0} max={150} value={pidParams.setpoint} onChange={(e) => setPidParams({ ...pidParams, setpoint: parseFloat(e.target.value) || 0 })} /></div>
+                <div><Lbl help={HELP.kp}>Kp</Lbl>
+                  <input type="number" step="0.1" min={0} className="input" value={pidParams.kp} onChange={(e) => setPidParams({ ...pidParams, kp: parseFloat(e.target.value) || 0 })} /></div>
+                <div><Lbl help={HELP.ki}>Ki</Lbl>
+                  <input type="number" step="0.01" min={0} className="input" value={pidParams.ki} onChange={(e) => setPidParams({ ...pidParams, ki: parseFloat(e.target.value) || 0 })} /></div>
+                <div><Lbl help={HELP.kd}>Kd</Lbl>
+                  <input type="number" step="0.1" min={0} className="input" value={pidParams.kd} onChange={(e) => setPidParams({ ...pidParams, kd: parseFloat(e.target.value) || 0 })} /></div>
+                <div><Lbl help={HELP.pidMinSpeed}>Min Speed (%)</Lbl>
+                  <input type="number" className="input" min={0} max={100} value={pidParams.min_speed} onChange={(e) => setPidParams({ ...pidParams, min_speed: parseInt(e.target.value) || 0 })} /></div>
+                <div><Lbl help={HELP.pidMaxSpeed}>Max Speed (%)</Lbl>
+                  <input type="number" className="input" min={0} max={100} value={pidParams.max_speed} onChange={(e) => setPidParams({ ...pidParams, max_speed: parseInt(e.target.value) || 0 })} /></div>
               </div>
             )}
           </div>
@@ -536,6 +607,7 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
             <h4 className="font-medium text-fg-2">Temperature / Load Inputs</h4>
             <div className="flex items-center gap-2">
               <label className="text-xs text-muted">Combine:</label>
+              <HelpTip text={HELP.combine} label="Combine inputs" />
               <select className="select py-1 text-sm w-40" value={inputAggregation} onChange={(e) => setInputAggregation(e.target.value as InputAggregation)}>
                 <option value="or">Max (respond to hottest)</option>
                 <option value="and">Min (all must be cool)</option>
@@ -576,19 +648,26 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
             )}
           </div>
 
-          {/* Selected inputs + per-input weights */}
+          {/* Selected inputs + per-input weights (weights only shown/used in weighted mode) */}
           {selectedInputs.length > 0 && (
             <div className="mt-3 space-y-1">
-              <p className="text-xs text-muted">Selected inputs{inputAggregation === 'weighted' ? ' (weights used)' : ''}:</p>
+              <div className="flex items-center gap-1">
+                <p className="text-xs text-muted">Selected inputs</p>
+                {inputAggregation === 'weighted' && <HelpTip text={HELP.weight} label="Weight" />}
+              </div>
               {selectedInputs.map((inp) => (
                 <div key={inputKey(inp)} className="flex items-center justify-between text-sm bg-surface-2/30 rounded px-2 py-1">
                   <span className="text-fg-3">{inp.input_type}{INPUT_TYPES.find((t) => t.value === inp.input_type)?.needsIndex ? ` #${inp.input_index}` : ''}</span>
                   <div className="flex items-center gap-2">
-                    <label className="text-xs text-muted-2">weight</label>
-                    <input type="number" step="0.5" min="0" className="input w-20 py-1"
-                      value={inp.weight} disabled={inputAggregation !== 'weighted'}
-                      onChange={(e) => setWeight(inputKey(inp), parseFloat(e.target.value) || 0)} />
-                    <button type="button" className="text-muted-2 hover:text-danger" onClick={() => toggleInput(inp.input_type, inp.input_index)}>✕</button>
+                    {inputAggregation === 'weighted' && (
+                      <>
+                        <label className="text-xs text-muted-2">weight</label>
+                        <input type="number" step="0.5" min="0.1" className="input w-20 py-1"
+                          value={inp.weight}
+                          onChange={(e) => setWeight(inputKey(inp), parseFloat(e.target.value) || 0)} />
+                      </>
+                    )}
+                    <button type="button" aria-label="Remove input" className="text-muted-2 hover:text-danger" onClick={() => toggleInput(inp.input_type, inp.input_index)}>✕</button>
                   </div>
                 </div>
               ))}
@@ -598,7 +677,13 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
 
         {/* Zones */}
         <div className="border-t border-surface-2 pt-4">
-          <h4 className="font-medium text-fg-2 mb-3">Target Zones</h4>
+          <div className="flex items-center gap-1 mb-1">
+            <h4 className="font-medium text-fg-2">Target Zones</h4>
+            <HelpTip text={HELP.zones} label="Target zones" />
+          </div>
+          <p className="text-xs text-muted-2 mb-3">
+            A control zone is a fan output. This board drives each fan header independently, so each fan is its own zone.
+          </p>
           {zones.length > 0 ? (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -627,13 +712,14 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
             <label className="flex items-center gap-2 text-sm text-fg-3">
               <input type="checkbox" checked={smoothTransition} onChange={(e) => setSmoothTransition(e.target.checked)} className="rounded" />
               Smooth transitions
+              <HelpTip text={HELP.smooth} label="Smooth transitions" />
             </label>
-            <div><label className="input-label">Transition (s)</label>
-              <input type="number" className="input" value={transitionTime} onChange={(e) => setTransitionTime(parseInt(e.target.value) || 0)} /></div>
-            <div><label className="input-label">Min run (s)</label>
-              <input type="number" className="input" value={minRunTime} onChange={(e) => setMinRunTime(parseInt(e.target.value) || 0)} /></div>
-            <div><label className="input-label">Hysteresis (°C)</label>
-              <input type="number" step="0.5" className="input" value={hysteresis} onChange={(e) => setHysteresis(parseFloat(e.target.value) || 0)} /></div>
+            <div><Lbl help={HELP.transition}>Transition (s)</Lbl>
+              <input type="number" className="input" min={0} max={300} value={transitionTime} onChange={(e) => setTransitionTime(parseInt(e.target.value) || 0)} /></div>
+            <div><Lbl help={HELP.minRun}>Min run (s)</Lbl>
+              <input type="number" className="input" min={0} max={300} value={minRunTime} onChange={(e) => setMinRunTime(parseInt(e.target.value) || 0)} /></div>
+            <div><Lbl help={HELP.hysteresis}>Hysteresis (°C)</Lbl>
+              <input type="number" step="0.5" min={0} max={10} className="input" value={hysteresis} onChange={(e) => setHysteresis(parseFloat(e.target.value) || 0)} /></div>
           </div>
         </div>
 
