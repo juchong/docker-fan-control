@@ -59,7 +59,6 @@ func initDefaultSettings() error {
 		models.SettingIPMIMode:          "local",
 		models.SettingIPMICommandFormat: models.IPMIFormatAuto,
 		models.SettingControlInterval:   5,
-		models.SettingTempUnit:          "C",
 		models.SettingStartupMode:       "resume",
 		models.SettingStartupPercent:    50,
 		models.SettingEmergencyTemp:     90,
@@ -112,7 +111,6 @@ func GetAllSettings() (*models.AppSettings, error) {
 	}
 
 	result := &models.AppSettings{
-		TempUnit:          "C",
 		StartupMode:       "resume",
 		IPMICommandFormat: models.IPMIFormatAuto,
 		EmergencyTemp:     90,
@@ -143,10 +141,6 @@ func GetAllSettings() (*models.AppSettings, error) {
 		case models.SettingControlInterval:
 			if v, ok := s.Value.Data.(float64); ok {
 				result.ControlInterval = int(v)
-			}
-		case models.SettingTempUnit:
-			if v, ok := s.Value.Data.(string); ok {
-				result.TempUnit = v
 			}
 		case models.SettingStartupMode:
 			if v, ok := s.Value.Data.(string); ok {

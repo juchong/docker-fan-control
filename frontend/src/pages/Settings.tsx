@@ -53,7 +53,6 @@ export function Settings() {
     ipmi_mode: 'local',
     ipmi_command_format: 'auto',
     control_interval: 5,
-    temp_unit: 'C',
     startup_mode: 'resume',
     emergency_temp: 90,
     emergency_speed: 100,
@@ -70,7 +69,6 @@ export function Settings() {
         ipmi_user: settings.ipmi_user,
         ipmi_command_format: settings.ipmi_command_format,
         control_interval: settings.control_interval,
-        temp_unit: settings.temp_unit,
         startup_mode: settings.startup_mode,
         startup_percent: settings.startup_percent,
         emergency_temp: settings.emergency_temp,
@@ -432,18 +430,6 @@ export function Settings() {
                 min={1}
                 max={60}
               />
-            </div>
-
-            <div>
-              <label className="input-label">Temperature Unit</label>
-              <select
-                className="select"
-                value={formData.temp_unit || 'C'}
-                onChange={(e) => handleChange('temp_unit', e.target.value)}
-              >
-                <option value="C">Celsius (°C)</option>
-                <option value="F">Fahrenheit (°F)</option>
-              </select>
             </div>
 
             <div>

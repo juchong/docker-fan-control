@@ -58,7 +58,6 @@ type AuthConfig struct {
 type DataConfig struct {
 	Path            string
 	ControlInterval time.Duration
-	TempUnit        string // "C" or "F"
 }
 
 // Load reads configuration from environment variables
@@ -92,7 +91,6 @@ func Load() *Config {
 		Data: DataConfig{
 			Path:            getEnv("DATA_PATH", "/app/data"),
 			ControlInterval: getEnvDuration("CONTROL_INTERVAL", 5*time.Second),
-			TempUnit:        getEnv("TEMP_UNIT", "C"),
 		},
 		LogLevel: getEnv("LOG_LEVEL", "info"),
 	}

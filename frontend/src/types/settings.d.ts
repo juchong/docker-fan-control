@@ -8,7 +8,6 @@ export interface AppSettings {
   ipmi_user?: string;
   ipmi_command_format: string;
   control_interval: number;
-  temp_unit: string;
   startup_mode: string;
   startup_percent?: number;
   emergency_temp: number;
@@ -29,7 +28,6 @@ export interface UpdateSettingsRequest {
   ipmi_pass?: string;
   ipmi_command_format?: string;
   control_interval?: number;
-  temp_unit?: string;
   startup_mode?: string;
   startup_percent?: number;
   emergency_temp?: number;

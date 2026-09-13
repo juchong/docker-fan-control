@@ -48,7 +48,6 @@ const (
 	SettingIPMIPass          = "ipmi_pass"           // BMC password (encrypted)
 	SettingIPMICommandFormat = "ipmi_command_format" // "auto", "asrock_romed8", "asrock_legacy", "dell", "supermicro"
 	SettingControlInterval   = "control_interval"    // seconds
-	SettingTempUnit          = "temp_unit"           // "C" or "F"
 	SettingStartupMode       = "startup_mode"        // "resume", "full", "percent"
 	SettingStartupPercent    = "startup_percent"     // if startup_mode is "percent"
 	SettingEmergencyTemp     = "emergency_temp"      // temperature threshold
@@ -95,7 +94,6 @@ type AppSettings struct {
 	IPMIUser          string `json:"ipmi_user,omitempty"`
 	IPMICommandFormat string `json:"ipmi_command_format"` // "auto", "asrock_romed8", "asrock_legacy", "dell", "supermicro"
 	ControlInterval   int    `json:"control_interval"`    // seconds
-	TempUnit          string `json:"temp_unit"`
 	StartupMode       string `json:"startup_mode"`
 	StartupPercent    int    `json:"startup_percent,omitempty"`
 	EmergencyTemp     int    `json:"emergency_temp"`
@@ -119,7 +117,6 @@ type UpdateSettingsRequest struct {
 	IPMIPass          *string `json:"ipmi_pass,omitempty"`           // Only set if changing
 	IPMICommandFormat *string `json:"ipmi_command_format,omitempty"` // "auto", "asrock_romed8", etc.
 	ControlInterval   *int    `json:"control_interval,omitempty"`
-	TempUnit          *string `json:"temp_unit,omitempty"`
 	StartupMode       *string `json:"startup_mode,omitempty"`
 	StartupPercent    *int    `json:"startup_percent,omitempty"`
 	EmergencyTemp     *int    `json:"emergency_temp,omitempty"`

@@ -77,11 +77,6 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.TempUnit != nil && *req.TempUnit != "C" && *req.TempUnit != "F" {
-		http.Error(w, "Temperature unit must be 'C' or 'F'", http.StatusBadRequest)
-		return
-	}
-
 	if req.StartupMode != nil && *req.StartupMode != "resume" && *req.StartupMode != "full" && *req.StartupMode != "percent" {
 		http.Error(w, "Startup mode must be 'resume', 'full', or 'percent'", http.StatusBadRequest)
 		return
@@ -166,9 +161,6 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.ControlInterval != nil {
 		database.SetSetting(models.SettingControlInterval, *req.ControlInterval)
 		h.controller.SetInterval(time.Duration(*req.ControlInterval) * time.Second)
-	}
-	if req.TempUnit != nil {
-		database.SetSetting(models.SettingTempUnit, *req.TempUnit)
 	}
 	if req.StartupMode != nil {
 		database.SetSetting(models.SettingStartupMode, *req.StartupMode)
