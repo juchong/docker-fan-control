@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ReferenceArea,
+  Legend, ResponsiveContainer,
 } from 'recharts';
 import { profilesApi, settingsApi } from '../services/api';
 import { useMonitoring } from '../hooks/useMonitoring';
@@ -490,6 +491,22 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
     return null;
   }, [name, priority, selectedZones, algorithm, linearParams, stepParams, pidParams, inputAggregation, selectedInputs, transitionTime, minRunTime, hysteresis]);
 
+  // Representative low/high fan speed for the transition preview, drawn from
+  // the profile's own speed range so the illustration matches its swing.
+  const [transitionLo, transitionHi] = useMemo<[number, number]>(() => {
+    let lo = 30;
+    let hi = 80;
+    if (algorithm === 'linear') { lo = linearParams.min_speed; hi = linearParams.max_speed; }
+    else if (algorithm === 'pid') { lo = pidParams.min_speed; hi = pidParams.max_speed; }
+    else if (algorithm === 'step' && stepParams.steps.length) {
+      const speeds = stepParams.steps.map((s) => s.speed);
+      lo = Math.min(...speeds);
+      hi = Math.max(...speeds);
+    }
+    if (!(hi > lo) || hi - lo < 10) { lo = 30; hi = 80; } // ensure a visible swing
+    return [lo, hi];
+  }, [algorithm, linearParams, pidParams, stepParams]);
+
   const handleSave = () => {
     let algorithmParams: Record<string, unknown>;
     if (algorithm === 'linear') algorithmParams = { ...linearParams };
@@ -721,6 +738,22 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
             <div><Lbl help={HELP.hysteresis}>Hysteresis (°C)</Lbl>
               <input type="number" step="0.5" min={0} max={10} className="input" value={hysteresis} onChange={(e) => setHysteresis(parseFloat(e.target.value) || 0)} /></div>
           </div>
+
+          {/* Live illustration of how these settings shape the fan's response
+              to a sharp change in demand. */}
+          <div className="mt-4">
+            <p className="text-sm font-medium text-fg-3 mb-1">Transition preview</p>
+            <p className="text-xs text-muted-2 mb-2">
+              How the fan responds to a sharp jump in demanded speed (and back), with your current settings.
+            </p>
+            <TransitionPreview
+              smooth={smoothTransition}
+              transitionTime={transitionTime}
+              minRun={minRunTime}
+              lo={transitionLo}
+              hi={transitionHi}
+            />
+          </div>
         </div>
 
         {/* Actions */}
@@ -735,6 +768,169 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
         </div>
       </div>
     </Modal>
+  );
+}
+
+// Builds an idealized demand step and the resulting fan-speed response for the
+// given smoothing settings. Mirrors the controller's behavior: Transition ramps
+// the speed toward the target at ~100%/transition-time; Min run blocks any
+// further change until it elapses; Smooth off makes the speed jump instantly.
+function computeTransition(smooth: boolean, transitionTime: number, minRun: number, lo: number, hi: number) {
+  const span = Math.max(1, hi - lo);
+  const rampDur = smooth ? (transitionTime * span) / 100 : 0; // seconds lo→hi
+  const lead = 3;
+  const t1 = lead; // demand steps up
+  const tUp = t1 + rampDur; // response reaches hi
+  const hold = Math.max(0, minRun);
+  const tHoldEnd = tUp + hold; // min-run hold ends
+  const t2 = tUp + Math.max(hold * 0.45, 3); // demand steps back down
+  const tDownStart = Math.max(tHoldEnd, t2); // response may fall now
+  const tDownEnd = tDownStart + rampDur;
+  const tail = Math.max(4, rampDur * 0.3);
+  const T = tDownEnd + tail;
+
+  const demand = (t: number) => (t < t1 ? lo : t < t2 ? hi : lo);
+  const response = (t: number) => {
+    if (t < t1) return lo;
+    if (t < tUp) return rampDur > 0 ? lo + (span * (t - t1)) / rampDur : hi;
+    if (t < tDownStart) return hi;
+    if (t < tDownEnd) return rampDur > 0 ? hi - (span * (t - tDownStart)) / rampDur : lo;
+    return lo;
+  };
+
+  const N = 200;
+  const data = Array.from({ length: N + 1 }, (_, i) => {
+    const t = (T * i) / N;
+    return { t: Math.round(t * 10) / 10, demand: demand(t), response: Math.round(response(t)) };
+  });
+
+  return {
+    data,
+    T,
+    marks: {
+      transUp: rampDur > 0.5 ? { x1: t1, x2: tUp } : null,
+      transDown: rampDur > 0.5 ? { x1: tDownStart, x2: tDownEnd } : null,
+      hold: hold > 0.5 ? { x1: tUp, x2: tHoldEnd } : null,
+      demandDrop: hold > 0.5 ? t2 : null,
+    },
+  };
+}
+
+function TransitionPreview({
+  smooth,
+  transitionTime,
+  minRun,
+  lo,
+  hi,
+}: {
+  smooth: boolean;
+  transitionTime: number;
+  minRun: number;
+  lo: number;
+  hi: number;
+}) {
+  const { data, T, marks } = useMemo(
+    () => computeTransition(smooth, transitionTime, minRun, lo, hi),
+    [smooth, transitionTime, minRun, lo, hi]
+  );
+  const axisColor = 'rgb(var(--c-muted))';
+  const gridColor = 'rgb(var(--c-line) / 0.6)';
+
+  return (
+    <div className="h-56 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 8, right: 12, left: -8, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+          <XAxis
+            dataKey="t"
+            type="number"
+            domain={[0, Math.ceil(T)]}
+            tick={{ fill: axisColor, fontSize: 11 }}
+            stroke={axisColor}
+            unit="s"
+            tickCount={8}
+          />
+          <YAxis
+            domain={[0, 100]}
+            tick={{ fill: axisColor, fontSize: 11 }}
+            stroke={axisColor}
+            width={40}
+            unit="%"
+          />
+          <Tooltip
+            contentStyle={{
+              background: 'rgb(var(--c-surface))',
+              border: '1px solid rgb(var(--c-line))',
+              borderRadius: 8,
+              color: 'rgb(var(--c-fg))',
+              fontSize: 12,
+            }}
+            labelFormatter={(v) => `${v}s`}
+            formatter={(val: number, name: string) => [`${val}%`, name]}
+          />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+
+          {/* Time-frame shading */}
+          {marks.transUp && (
+            <ReferenceArea
+              x1={marks.transUp.x1}
+              x2={marks.transUp.x2}
+              fill="rgb(var(--c-info))"
+              fillOpacity={0.1}
+              stroke="none"
+              label={{ value: 'Transition', position: 'insideTop', fill: axisColor, fontSize: 10 }}
+            />
+          )}
+          {marks.transDown && (
+            <ReferenceArea
+              x1={marks.transDown.x1}
+              x2={marks.transDown.x2}
+              fill="rgb(var(--c-info))"
+              fillOpacity={0.1}
+              stroke="none"
+            />
+          )}
+          {marks.hold && (
+            <ReferenceArea
+              x1={marks.hold.x1}
+              x2={marks.hold.x2}
+              fill="rgb(var(--c-warn))"
+              fillOpacity={0.12}
+              stroke="none"
+              label={{ value: 'Min run (hold)', position: 'insideTop', fill: axisColor, fontSize: 10 }}
+            />
+          )}
+          {marks.demandDrop != null && (
+            <ReferenceLine
+              x={marks.demandDrop}
+              stroke="rgb(var(--c-muted))"
+              strokeDasharray="3 3"
+              label={{ value: 'demand ↓', position: 'insideBottomLeft', fill: axisColor, fontSize: 10 }}
+            />
+          )}
+
+          <Line
+            type="stepAfter"
+            dataKey="demand"
+            name="Demanded speed"
+            stroke="rgb(var(--c-muted))"
+            strokeWidth={2}
+            strokeDasharray="5 4"
+            dot={false}
+            isAnimationActive={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="response"
+            name="Fan speed"
+            stroke="rgb(var(--c-ok))"
+            strokeWidth={2.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
