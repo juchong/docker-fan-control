@@ -30,6 +30,7 @@ type HwmonDriver struct {
 
 	mu         sync.Mutex
 	preferName string         // preferred hwmon "name" (e.g. "nct6799"); "" = any nct6xxx
+	sysfsRoot  string         // hwmon class dir; defaults to /sys/class/hwmon (override in tests)
 	path       string         // resolved /sys/class/hwmon/hwmonN directory
 	chipName   string         // hwmon "name" of the resolved chip
 	channels   []int          // pwm channel numbers present (1-based), sorted
@@ -98,7 +99,11 @@ func (d *HwmonDriver) buildZoneLayout() services.ZoneLayout {
 // discover resolves the hwmon directory and enumerates PWM channels. Safe to
 // call repeatedly. Returns an error if no usable chip is found.
 func (d *HwmonDriver) discover() error {
-	namePaths, _ := filepath.Glob("/sys/class/hwmon/hwmon*/name")
+	root := d.sysfsRoot
+	if root == "" {
+		root = "/sys/class/hwmon"
+	}
+	namePaths, _ := filepath.Glob(filepath.Join(root, "hwmon*/name"))
 
 	type cand struct {
 		dir  string

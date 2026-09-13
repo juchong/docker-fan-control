@@ -32,18 +32,18 @@ func TestASRockDriver_CanDetect(t *testing.T) {
 	assert.True(t, driver.CanDetect(ctx))
 	mockIPMI.AssertExpectations(t)
 	
-	// Test detection via command
+	// Test detection via command (each mock needs its own driver instance).
 	mockIPMI2 := new(MockIPMIExecutor)
 	mockIPMI2.On("RunCommand", ctx, []string{"raw", "0x3a", "0xa7"}).Return([]byte("Unknown"), nil)
 	mockIPMI2.On("RunCommand", ctx, []string{"raw", "0x3a", "0xd7"}).Return([]byte("33 33 33 33 33 33 33 1e"), nil)
-	assert.True(t, driver.CanDetect(ctx))
+	assert.True(t, NewASRockDriver(mockIPMI2).CanDetect(ctx))
 	mockIPMI2.AssertExpectations(t)
-	
-	// Test failed detection
+
+	// Test failed detection. The first probe erroring returns false immediately,
+	// so the second probe is not issued.
 	mockIPMI3 := new(MockIPMIExecutor)
 	mockIPMI3.On("RunCommand", ctx, []string{"raw", "0x3a", "0xa7"}).Return([]byte(""), assert.AnError)
-	mockIPMI3.On("RunCommand", ctx, []string{"raw", "0x3a", "0xd7"}).Return([]byte(""), assert.AnError)
-	assert.False(t, driver.CanDetect(ctx))
+	assert.False(t, NewASRockDriver(mockIPMI3).CanDetect(ctx))
 	mockIPMI3.AssertExpectations(t)
 }
 
@@ -59,18 +59,18 @@ func TestDellDriver_CanDetect(t *testing.T) {
 	assert.True(t, driver.CanDetect(ctx))
 	mockIPMI.AssertExpectations(t)
 	
-	// Test detection via fan speed command
+	// Test detection via fan speed command (each mock needs its own driver).
 	mockIPMI2 := new(MockIPMIExecutor)
 	mockIPMI2.On("RunCommand", ctx, []string{"raw", "0x30", "0x30", "0x01", "0x00"}).Return([]byte(""), assert.AnError)
 	mockIPMI2.On("RunCommand", ctx, []string{"raw", "0x30", "0x30", "0x02", "0x00", "0x32"}).Return([]byte(""), nil)
-	assert.True(t, driver.CanDetect(ctx))
+	assert.True(t, NewDellDriver(mockIPMI2).CanDetect(ctx))
 	mockIPMI2.AssertExpectations(t)
-	
+
 	// Test failed detection
 	mockIPMI3 := new(MockIPMIExecutor)
 	mockIPMI3.On("RunCommand", ctx, []string{"raw", "0x30", "0x30", "0x01", "0x00"}).Return([]byte(""), assert.AnError)
 	mockIPMI3.On("RunCommand", ctx, []string{"raw", "0x30", "0x30", "0x02", "0x00", "0x32"}).Return([]byte(""), assert.AnError)
-	assert.False(t, driver.CanDetect(ctx))
+	assert.False(t, NewDellDriver(mockIPMI3).CanDetect(ctx))
 	mockIPMI3.AssertExpectations(t)
 }
 
@@ -86,18 +86,18 @@ func TestSupermicroDriver_CanDetect(t *testing.T) {
 	assert.True(t, driver.CanDetect(ctx))
 	mockIPMI.AssertExpectations(t)
 	
-	// Test detection via fan speed command
+	// Test detection via fan speed command (each mock needs its own driver).
 	mockIPMI2 := new(MockIPMIExecutor)
 	mockIPMI2.On("RunCommand", ctx, []string{"raw", "0x30", "0x45", "0x01", "0x00"}).Return([]byte(""), assert.AnError)
 	mockIPMI2.On("RunCommand", ctx, []string{"raw", "0x30", "0x70", "0x66", "0x01", "0x00", "0x32"}).Return([]byte(""), nil)
-	assert.True(t, driver.CanDetect(ctx))
+	assert.True(t, NewSupermicroDriver(mockIPMI2).CanDetect(ctx))
 	mockIPMI2.AssertExpectations(t)
-	
+
 	// Test failed detection
 	mockIPMI3 := new(MockIPMIExecutor)
 	mockIPMI3.On("RunCommand", ctx, []string{"raw", "0x30", "0x45", "0x01", "0x00"}).Return([]byte(""), assert.AnError)
 	mockIPMI3.On("RunCommand", ctx, []string{"raw", "0x30", "0x70", "0x66", "0x01", "0x00", "0x32"}).Return([]byte(""), assert.AnError)
-	assert.False(t, driver.CanDetect(ctx))
+	assert.False(t, NewSupermicroDriver(mockIPMI3).CanDetect(ctx))
 	mockIPMI3.AssertExpectations(t)
 }
 
@@ -261,9 +261,10 @@ func TestDriverDiscoveryOrder(t *testing.T) {
 	
 	ctx := context.Background()
 	
-	// Mock ASRock detection to fail, Dell to succeed
+	// Mock ASRock detection to fail, Dell to succeed. ASRock's CanDetect returns
+	// false as soon as its first probe (0x3a 0xa7) errors, so its second probe is
+	// never issued and must not be mocked.
 	mockIPMI.On("RunCommand", ctx, []string{"raw", "0x3a", "0xa7"}).Return([]byte(""), assert.AnError)
-	mockIPMI.On("RunCommand", ctx, []string{"raw", "0x3a", "0xd7"}).Return([]byte(""), assert.AnError)
 	mockIPMI.On("RunCommand", ctx, []string{"raw", "0x30", "0x30", "0x01", "0x00"}).Return([]byte(""), nil)
 	
 	driver, err := registry.DetectBestDriver(ctx)
@@ -286,13 +287,17 @@ func TestFallbackToGeneric(t *testing.T) {
 	
 	ctx := context.Background()
 	
-	// Mock all drivers to fail detection
+	// Mock all drivers to fail detection. ASRock stops after its first probe when
+	// that errors, so only 0x3a 0xa7 is issued (not 0x3a 0xd7).
 	mockIPMI.On("RunCommand", ctx, []string{"raw", "0x3a", "0xa7"}).Return([]byte(""), assert.AnError)
-	mockIPMI.On("RunCommand", ctx, []string{"raw", "0x3a", "0xd7"}).Return([]byte(""), assert.AnError)
 	mockIPMI.On("RunCommand", ctx, []string{"raw", "0x30", "0x30", "0x01", "0x00"}).Return([]byte(""), assert.AnError)
+	// Dell's CanDetect falls through to a second probe when the first fails.
+	mockIPMI.On("RunCommand", ctx, []string{"raw", "0x30", "0x30", "0x02", "0x00", "0x32"}).Return([]byte(""), assert.AnError)
 	mockIPMI.On("RunCommand", ctx, []string{"raw", "0x30", "0x45", "0x01", "0x00"}).Return([]byte(""), assert.AnError)
 	mockIPMI.On("RunCommand", ctx, []string{"raw", "0x30", "0x70", "0x66", "0x01", "0x00", "0x32"}).Return([]byte(""), assert.AnError)
-	
+	// The Generic driver is selected as the fallback; its Discover() probes "mc info".
+	mockIPMI.On("RunCommand", ctx, []string{"mc", "info"}).Return([]byte(""), assert.AnError)
+
 	driver, err := registry.DetectBestDriver(ctx)
 	assert.NoError(t, err)
 	assert.NotNil(t, driver)
