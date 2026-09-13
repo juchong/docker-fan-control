@@ -628,10 +628,89 @@ func (c *FanController) gatherInputs() map[string]float64 {
 	return inputs
 }
 
-// calculateInputValue calculates the combined input value for a profile
+// paramFloat reads a float from algorithm params with a default.
+func paramFloat(p models.AlgorithmParams, key string, def float64) float64 {
+	if v, ok := p[key]; ok {
+		if f, ok := v.(float64); ok {
+			return f
+		}
+	}
+	return def
+}
+
+// profileInputAxis returns the low/high bounds of the profile's control input
+// axis — i.e. the "temperature" domain its curve maps to speed. Load inputs are
+// projected onto this axis so they can be combined with real temperatures.
+func profileInputAxis(profile *models.Profile) (float64, float64) {
+	p := profile.AlgorithmParams
+	switch profile.Algorithm {
+	case "step":
+		var lo, hi float64
+		found := false
+		if steps, ok := p["steps"].([]any); ok {
+			for _, s := range steps {
+				m, ok := s.(map[string]any)
+				if !ok {
+					continue
+				}
+				t, ok := m["temp"].(float64)
+				if !ok {
+					continue
+				}
+				if !found {
+					lo, hi, found = t, t, true
+					continue
+				}
+				if t < lo {
+					lo = t
+				}
+				if t > hi {
+					hi = t
+				}
+			}
+		}
+		if !found || hi <= lo {
+			return 30, 80
+		}
+		return lo, hi
+	case "pid":
+		// PID drives the aggregate (process variable) toward setpoint. Center a
+		// nominal band on the setpoint so load maps sensibly around it.
+		sp := paramFloat(p, "setpoint", 70)
+		return sp - 15, sp + 15
+	default: // linear
+		lo := paramFloat(p, "min_temp", 30)
+		hi := paramFloat(p, "max_temp", 80)
+		if hi <= lo {
+			return 30, 80
+		}
+		return lo, hi
+	}
+}
+
+// isLoadInput reports whether an input type is a utilization (%) signal rather
+// than a temperature.
+func isLoadInput(t string) bool {
+	return t == models.InputTypeGPULoad || t == models.InputTypeCPULoad
+}
+
+// calculateInputValue calculates the combined input value for a profile.
+//
+// Inputs may mix temperatures (°C) and utilization/load (%). These are
+// different units, so load values are first projected onto the profile's curve
+// axis (0% load → axis low, 100% → axis high) before aggregation. This makes
+// mixed load+temp profiles behave sensibly: with Max, fans respond to whichever
+// of "how hot" or "how loaded" demands more cooling; with weighted/avg they
+// blend on a common scale instead of averaging incompatible units.
 func (c *FanController) calculateInputValue(profile *models.Profile, inputs map[string]float64) float64 {
 	if len(profile.Inputs) == 0 {
 		return 0
+	}
+
+	axisLo, axisHi := profileInputAxis(profile)
+	axisSpan := axisHi - axisLo
+	if axisSpan <= 0 {
+		axisLo, axisSpan = 30, 50 // 30..80 fallback
 	}
 
 	var values []float64
@@ -650,6 +729,16 @@ func (c *FanController) calculateInputValue(profile *models.Profile, inputs map[
 		}
 
 		if val, ok := inputs[key]; ok {
+			if isLoadInput(input.InputType) {
+				// Project load% onto the curve's temperature axis.
+				lv := val
+				if lv < 0 {
+					lv = 0
+				} else if lv > 100 {
+					lv = 100
+				}
+				val = axisLo + (lv/100.0)*axisSpan
+			}
 			values = append(values, val)
 			weights = append(weights, input.Weight)
 		}

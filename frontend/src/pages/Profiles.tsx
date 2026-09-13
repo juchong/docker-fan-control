@@ -399,12 +399,30 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
     }
   };
 
+  // Curve input axis (°C domain). Load inputs are projected onto it so they can
+  // be combined with temperatures — mirrors the backend profileInputAxis().
+  const [axisLo, axisHi] = useMemo<[number, number]>(() => {
+    if (algorithm === 'linear') {
+      const lo = linearParams.min_temp, hi = linearParams.max_temp;
+      return hi > lo ? [lo, hi] : [30, 80];
+    }
+    if (algorithm === 'pid') return [pidParams.setpoint - 15, pidParams.setpoint + 15];
+    const temps = stepParams.steps.map((s) => s.temp);
+    const lo = Math.min(...temps), hi = Math.max(...temps);
+    return temps.length && hi > lo ? [lo, hi] : [30, 80];
+  }, [algorithm, linearParams, pidParams, stepParams]);
+
   // Aggregated current input value (mirrors the backend), for the "you are here" marker.
   const currentInput = useMemo(() => {
+    const span = axisHi - axisLo > 0 ? axisHi - axisLo : 50;
+    const project = (type: string, v: number) =>
+      type === 'gpu_load' || type === 'cpu_load'
+        ? axisLo + (Math.max(0, Math.min(100, v)) / 100) * span
+        : v;
     const vals: number[] = []; const weights: number[] = [];
     for (const inp of selectedInputs) {
       const v = liveValue(inp.input_type, inp.input_index);
-      if (v != null) { vals.push(v); weights.push(inp.weight || 1); }
+      if (v != null) { vals.push(project(inp.input_type, v)); weights.push(inp.weight || 1); }
     }
     if (vals.length === 0) return null;
     switch (inputAggregation) {
@@ -417,7 +435,7 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
       default: return Math.max(...vals);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedInputs, inputAggregation, monitoring]);
+  }, [selectedInputs, inputAggregation, monitoring, axisLo, axisHi]);
 
   const toggleInput = (type: string, index: number) => {
     const key = `${type}-${index}`;
@@ -633,6 +651,13 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
               </select>
             </div>
           </div>
+
+          {selectedInputs.some((i) => i.input_type === 'gpu_load' || i.input_type === 'cpu_load') && (
+            <p className="text-xs text-info/90 bg-info/10 border border-info/20 rounded px-2 py-1 mb-2">
+              Load inputs (%) are mapped onto this profile's curve — 0 % load = curve start, 100 % load = curve end —
+              so they combine meaningfully with temperatures instead of being averaged as if they were degrees.
+            </p>
+          )}
 
           <div className="space-y-2">
             {gpuCount > 0 && (
