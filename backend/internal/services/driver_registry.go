@@ -3,13 +3,17 @@ package services
 import (
 	"context"
 	"sort"
+	"sync"
 )
 
 // DriverRegistry manages available IPMI drivers and their discovery
 
 type DriverRegistry struct {
-	drivers       []IPMIDriver
+	drivers        []IPMIDriver
 	preferredOrder map[string]int // Vendor/model to preferred order
+
+	mu     sync.RWMutex
+	active IPMIDriver // last successfully detected driver (see GetActiveDriver)
 }
 
 // NewDriverRegistry creates a new driver registry
@@ -78,19 +82,42 @@ func (r *DriverRegistry) DetectBestDriver(ctx context.Context) (IPMIDriver, erro
 	for _, driver := range sortedDrivers {
 		if driver.CanDetect(ctx) {
 			if err := driver.Discover(ctx); err == nil {
+				r.setActive(driver)
 				return driver, nil
 			}
 		}
 	}
-	
+
 	// If no driver detected, return the generic driver
 	for _, driver := range sortedDrivers {
 		if driver.GetVendor() == "Generic" {
+			r.setActive(driver)
 			return driver, nil
 		}
 	}
-	
+
 	return nil, nil
+}
+
+func (r *DriverRegistry) setActive(d IPMIDriver) {
+	r.mu.Lock()
+	r.active = d
+	r.mu.Unlock()
+}
+
+// GetActiveDriver returns the last successfully detected driver without
+// re-probing every driver. It runs detection once (lazily) if none has been
+// selected yet. Callers that only need "the driver currently in use" (e.g.
+// profile/zone validation) should use this instead of DetectBestDriver, which
+// re-issues detection probes on every call.
+func (r *DriverRegistry) GetActiveDriver(ctx context.Context) (IPMIDriver, error) {
+	r.mu.RLock()
+	d := r.active
+	r.mu.RUnlock()
+	if d != nil {
+		return d, nil
+	}
+	return r.DetectBestDriver(ctx)
 }
 
 // GetDriverByVendor returns a driver by vendor name

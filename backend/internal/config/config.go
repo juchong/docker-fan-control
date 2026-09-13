@@ -12,10 +12,11 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	Server ServerConfig
-	IPMI   IPMIConfig
-	Auth   AuthConfig
-	Data   DataConfig
+	Server   ServerConfig
+	IPMI     IPMIConfig
+	Auth     AuthConfig
+	Data     DataConfig
+	LogLevel string // zerolog level name: trace|debug|info|warn|error (LOG_LEVEL)
 }
 
 // ServerConfig holds HTTP server settings
@@ -93,6 +94,7 @@ func Load() *Config {
 			ControlInterval: getEnvDuration("CONTROL_INTERVAL", 5*time.Second),
 			TempUnit:        getEnv("TEMP_UNIT", "C"),
 		},
+		LogLevel: getEnv("LOG_LEVEL", "info"),
 	}
 }
 

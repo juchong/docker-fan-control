@@ -30,6 +30,14 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
+	// Apply the configured log level (LOG_LEVEL); default info.
+	if lvl, err := zerolog.ParseLevel(cfg.LogLevel); err == nil {
+		zerolog.SetGlobalLevel(lvl)
+	} else {
+		log.Warn().Str("log_level", cfg.LogLevel).Msg("invalid LOG_LEVEL; defaulting to info")
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	}
+
 	// Refuse to start with the default JWT secret when auth is enabled: a known
 	// secret lets anyone forge valid tokens. Set a strong AUTH_JWT_SECRET.
 	if cfg.Auth.Enabled && string(cfg.Auth.JWTSecret) == "change-me-in-production" {

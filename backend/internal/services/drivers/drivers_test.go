@@ -305,3 +305,25 @@ func TestFallbackToGeneric(t *testing.T) {
 	
 	mockIPMI.AssertExpectations(t)
 }
+
+// TestGetActiveDriverCaches verifies GetActiveDriver returns the previously
+// detected driver without re-probing.
+func TestGetActiveDriverCaches(t *testing.T) {
+	registry := services.NewDriverRegistry()
+	mockIPMI := new(MockIPMIExecutor)
+	registry.RegisterDriver(NewGenericDriver(mockIPMI))
+
+	ctx := context.Background()
+	mockIPMI.On("RunCommand", ctx, []string{"mc", "info"}).Return([]byte(""), assert.AnError)
+
+	d1, err := registry.DetectBestDriver(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, d1)
+
+	d2, err := registry.GetActiveDriver(ctx)
+	assert.NoError(t, err)
+	assert.Same(t, d1, d2)
+
+	// "mc info" ran once (during the initial Discover), not again for GetActiveDriver.
+	mockIPMI.AssertNumberOfCalls(t, "RunCommand", 1)
+}

@@ -389,8 +389,9 @@ func (v *ProfileValidator) validateZones(zones []int) error {
 		return nil
 	}
 
-	// Get current driver capabilities
-	driver, err := v.driverRegistry.DetectBestDriver(context.Background())
+	// Use the driver already in use rather than re-running detection (which would
+	// re-issue probe commands) on every profile save.
+	driver, err := v.driverRegistry.GetActiveDriver(context.Background())
 	if err != nil || driver == nil {
 		return &ValidationError{
 			Field:   "zones",
