@@ -1,10 +1,33 @@
-# IPMI Drivers
+# Fan Control Drivers
 
-This directory contains vendor-specific IPMI driver implementations for the docker-fan-control project.
+This directory contains the fan-control driver implementations. Despite the
+historical `IPMIDriver` name, drivers are **not** limited to IPMI: the primary
+driver for BMC-less boards (`hwmon.go`) talks directly to the Linux hwmon sysfs
+interface, while the vendor drivers (`asrock`, `dell`, `supermicro`, `generic`)
+use `ipmitool`.
 
 ## Overview
 
-The driver system provides a plugin-based architecture for supporting different motherboard vendors and models. Each driver implements the `IPMIDriver` interface and handles the specific IPMI command formats required by that vendor.
+The driver system is a plugin-style architecture. Each driver implements the
+`IPMIDriver` interface, advertises its capabilities and **zone layout**, and is
+registered with the `DriverRegistry`, which picks the best match at startup
+(preferred order: `Hwmon`, then the IPMI vendors, then `Generic`).
+
+**Zone IDs are driver-owned and stable.** A profile stores zone IDs and the
+controller passes them straight to `SetFanSpeed(zone, …)`. For hwmon the zone ID
+is the **PWM channel number** (so a saved profile keeps addressing the same
+physical fan across re-detects); for IPMI drivers it is the vendor zone index.
+Validate zones by membership in `GetZoneLayout()`, never by a numeric range.
+
+Drivers that can report actual PWM duty may also implement the optional
+`FanReadingProvider` interface so `IPMIService.GetFanReadings` surfaces accurate
+duty:
+
+```go
+type FanReadingProvider interface {
+    GetFanReadings(ctx context.Context) (map[string]FanReading, error) // sensorID -> {RPM, DutyCycle}
+}
+```
 
 ## Driver Interface
 
@@ -34,6 +57,34 @@ type IPMIDriver interface {
 ```
 
 ## Available Drivers
+
+### 0. Hwmon Driver (`hwmon.go`) — primary, no BMC required
+
+**Vendor**: `Hwmon`
+**Model**: the resolved chip name (e.g. `nct6799`)
+**Backend**: Linux hwmon sysfs — no IPMI, no BMC. This is the driver for
+consumer/enthusiast boards.
+
+**Features**:
+- Direct PWM duty control by writing `/sys/class/hwmon/<chip>/pwmN`
+- Real duty-cycle reading (implements `FanReadingProvider`)
+- One zone per PWM channel; zone ID **is** the channel number
+- Manual mode by setting `pwmN_enable=1`; the original `pwmN_enable` value is
+  captured at discovery and restored to return control to firmware
+
+**How it works**:
+- Discovery globs `/sys/class/hwmon/*/name`, picks the `nct6xxx` chip (or the one
+  pinned by `HWMON_CHIP`) that exposes `pwm1`, and enumerates `pwm1..pwm8`.
+- `SetFanSpeed(channel, percent)` writes `pwmN_enable=1` then `pwmN=<0-255>`.
+- Duty ↔ percent: `pwm = round(percent * 255 / 100)`.
+
+**Host requirements**: the Super-I/O module (`nct6775`) loaded on the host, a
+**read-write** `/sys` bind mount, and `apparmor=unconfined` on the container (the
+default AppArmor profile blocks `/sys` writes even as root). See the project
+README for setup.
+
+**Testability**: the driver reads its class dir from an injectable `sysfsRoot`
+field (defaults to `/sys/class/hwmon`), so tests point it at a fake `/sys`.
 
 ### 1. ASRock Driver (`asrock.go`)
 

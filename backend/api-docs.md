@@ -52,6 +52,46 @@ GET /api/auth/me
 }
 ```
 
+#### Auth Status
+
+```
+GET /api/auth/status
+```
+
+Unauthenticated. Reports whether auth is enabled and whether reverse-proxy auth
+is active, so the UI can branch into login / auth-disabled / proxy modes.
+
+```json
+{ "auth_enabled": true, "proxy_enabled": false }
+```
+
+#### Refresh Token
+
+```
+POST /api/auth/refresh
+```
+
+Returns a new token for the current session (extends a long-lived session).
+
+#### Change Password
+
+```
+PUT /api/auth/password
+```
+
+**Request Body:**
+```json
+{ "current_password": "...", "new_password": "..." }
+```
+
+#### Logout
+
+```
+POST /api/auth/logout
+```
+
+> User management (admin): `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`.
+
 ## Profiles
 
 Profiles define how fans should be controlled based on temperature/load inputs.
@@ -255,11 +295,22 @@ POST /api/fans/{id}/speed
 **Request Body:**
 ```json
 {
-  "percent": 75
+  "percent": 75,
+  "duration_seconds": 300
 }
 ```
 
-Sets a manual override for the fan speed (0-100%). This bypasses profile-based control.
+Sets a manual override for the fan's zone (0-100%), bypassing profile control.
+`duration_seconds` is optional; omit it for an override with no expiry.
+
+### Clear Manual Fan Speed
+
+```
+DELETE /api/fans/{id}/speed
+```
+
+Clears the manual override and returns the fan's zone to automatic (profile)
+control. Ship this after any manual set, or the zone stays overridden.
 
 ## Controller
 
@@ -436,11 +487,12 @@ PUT /api/settings
 ```
 
 **Zone Layout Configuration:**
-- `zone_layout` allows custom zone configurations
+- `zone_layout` allows optionally naming the driver's zones
 - Each zone has an `id`, `name`, `fan_indices` array, and optional `description`
-- `is_default` marks the primary zone for backward compatibility
-- Zone IDs must be unique and within driver's `max_zones` limit
-- Fan indices reference the order of fans detected by IPMI
+- `is_default` marks the primary zone
+- Zone IDs are **driver-owned** and must match the active driver's
+  `GetZoneLayout()` — they are validated by membership, not by a numeric range.
+  For the hwmon driver a zone ID is the PWM channel number.
 
 ### Test IPMI Connection
 
@@ -579,9 +631,25 @@ GET /api/logs
 }
 ```
 
+### Export Events
+
+```
+GET /api/logs/export?format=json
+```
+
+Downloads the (filtered) event log as a file. `format` is `json` or `csv`; the
+same `level`/`category`/`search`/`start_time`/`end_time` filters apply.
+
+### Clear Events
+
+```
+DELETE /api/logs
+```
+
 ## WebSocket
 
-Connect to `ws://localhost:8080/ws` for real-time updates.
+Connect to `ws://<host>/api/ws` (use `wss://` behind TLS) for real-time updates.
+The server pushes a `metrics` message every control cycle.
 
 **Message Format:**
 ```json
@@ -681,11 +749,12 @@ Common error codes:
 All input types require an `input_index` to specify which sensor to use:
 
 - `gpu_temp`: GPU temperature (e.g., GPU 0, GPU 1)
-- `gpu_load`: GPU utilization percentage
+- `gpu_load`: GPU utilization percentage (projected onto the profile's curve axis)
 - `cpu_temp`: CPU package temperature (e.g., CPU 0, CPU 1)
-- `cpu_load`: Overall CPU load percentage (index ignored)
+- `cpu_load`: Overall CPU load percentage (index ignored; projected onto the curve axis)
 - `drive_temp`: Drive temperature (e.g., Drive 0, Drive 1)
+- `board_temp`: Motherboard/VRM/chipset temperature (nct6xxx `tempN`)
 
-## Troubleshooting
-
-For detailed troubleshooting guidance, see [TROUBLESHOOTING.md](../TROUBLESHOOTING.md).
+Temperature inputs are °C; load inputs are % and are mapped onto the profile's
+curve axis (0% → curve start, 100% → curve end) so they can be aggregated with
+temperatures. See [`../AGENTS.md`](../AGENTS.md) for the control-loop details.
