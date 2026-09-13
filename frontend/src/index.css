@@ -113,9 +113,11 @@ body {
   @apply px-3 py-1.5 text-sm;
 }
 
-/* Input styles */
+/* Input styles.
+   focus:ring-inset draws the focus ring INSIDE the field's box so it can't
+   overflow and get clipped by a scrolling container (e.g. the profile modal). */
 .input {
-  @apply w-full px-3 py-2 bg-surface-2 border border-line-strong rounded-lg text-fg-2 placeholder-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  @apply w-full px-3 py-2 bg-surface-2 border border-line-strong rounded-lg text-fg-2 placeholder-muted focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary-500;
 }
 
 .input-label {
@@ -125,7 +127,7 @@ body {
 /* Select styles — appearance-none + a custom chevron so a native <select>
    matches the exact height/box of .input (native selects render taller). */
 .select {
-  @apply w-full px-3 py-2 pr-9 bg-surface-2 border border-line-strong rounded-lg text-fg-2 appearance-none bg-no-repeat focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  @apply w-full px-3 py-2 pr-9 bg-surface-2 border border-line-strong rounded-lg text-fg-2 appearance-none bg-no-repeat focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary-500;
   background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-position: right 0.6rem center;
   background-size: 1rem;
