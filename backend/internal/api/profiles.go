@@ -10,6 +10,7 @@ import (
 	"docker-fan-control/internal/services"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 )
 
 // normalizeProfileRequest trims surrounding whitespace on free-text fields.
@@ -141,6 +142,11 @@ func (h *ProfilesHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	profile, err := h.profiles.Create(r.Context(), &req)
 	if err != nil {
+		if services.IsValidationError(err) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		log.Error().Err(err).Msg("profile create failed")
 		http.Error(w, "Failed to create profile", http.StatusInternalServerError)
 		return
 	}
@@ -205,6 +211,11 @@ func (h *ProfilesHandler) Update(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Profile not found", http.StatusNotFound)
 			return
 		}
+		if services.IsValidationError(err) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		log.Error().Err(err).Uint64("profile_id", id).Msg("profile update failed")
 		http.Error(w, "Failed to update profile", http.StatusInternalServerError)
 		return
 	}

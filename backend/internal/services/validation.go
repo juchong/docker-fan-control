@@ -399,16 +399,15 @@ func (v *ProfileValidator) validateZones(zones []int) error {
 		}
 	}
 
+	// Validate against the ACTIVE DRIVER's zone layout — the single source of
+	// truth for zone identity (hwmon uses the PWM channel number). A saved custom
+	// zone layout is for *naming* zones only; it must NOT override which zone IDs
+	// exist, or a stale/incompatible layout (e.g. an old {0,1} IPMI-style layout
+	// on a hwmon host) would wrongly reject profiles that target real driver
+	// zones. Zone IDs need not form a 0..MaxZones-1 range, so validate by
+	// membership rather than a numeric range.
 	zoneLayout := driver.GetZoneLayout()
 
-	// Check if custom zone layout is configured
-	if customLayout, err := v.getCustomZoneLayout(); err == nil && customLayout != nil {
-		zoneLayout = *customLayout
-	}
-
-	// Zone IDs are driver-defined and need not form a 0..MaxZones-1 range (the
-	// hwmon driver uses the PWM channel number), so validate purely by
-	// membership in the layout rather than a numeric range.
 	validZones := make(map[int]bool)
 	for _, z := range zoneLayout.Zones {
 		validZones[z.ID] = true
