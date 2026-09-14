@@ -448,6 +448,22 @@ func GetUserFromContext(ctx context.Context) *models.User {
 type contextUserKey struct{}
 
 // AuthMiddleware checks for valid authentication
+// WSTokenFromQuery lets a WebSocket client authenticate with a ?token= query
+// parameter, since browsers cannot set an Authorization header on a WebSocket.
+// When no Authorization header is present it copies the query token into one so
+// AuthMiddleware validates it normally. Scoped to the WS route only, so tokens
+// in URLs stay off the general API.
+func WSTokenFromQuery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			if tok := r.URL.Query().Get("token"); tok != "" {
+				r.Header.Set("Authorization", "Bearer "+tok)
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func AuthMiddleware(authSvc *services.AuthService, cfg *config.AuthConfig) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -178,9 +178,13 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 		})
 	})
 
-	// WebSocket for real-time updates (requires authentication if enabled)
+	// WebSocket for real-time updates (requires authentication if enabled).
+	// Browsers can't set an Authorization header on a WebSocket, so accept the
+	// JWT from a ?token= query param here (scoped to this route only) and feed it
+	// to the normal AuthMiddleware.
 	r.Group(func(r chi.Router) {
 		if cfg.Auth.Enabled {
+			r.Use(WSTokenFromQuery)
 			r.Use(AuthMiddleware(svc.Auth, &cfg.Auth))
 		}
 		r.Get(apiBasePath+"/ws", wsHandler.Handle)

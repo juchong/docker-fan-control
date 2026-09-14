@@ -23,7 +23,17 @@ class WebSocketService {
 
     this.isConnecting = true;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/ws`;
+    // Browsers can't set an Authorization header on a WebSocket, so pass the JWT
+    // as a query param (read fresh each connect so token refreshes are picked up).
+    let token = '';
+    try {
+      token = localStorage.getItem('auth_token') || '';
+    } catch {
+      // localStorage unavailable — connect without a token (auth-disabled mode)
+    }
+    const wsUrl = `${protocol}//${window.location.host}/api/ws${
+      token ? `?token=${encodeURIComponent(token)}` : ''
+    }`;
 
     this.ws = new WebSocket(wsUrl);
 
