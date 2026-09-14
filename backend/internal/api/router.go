@@ -35,6 +35,8 @@ func NewRouter(svc *Services, cfg *config.Config) *chi.Mux {
 	// Trusted-proxy-aware client IP (replaces chi middleware.RealIP, which trusts
 	// spoofable X-Forwarded-* from any peer). Configure TRUSTED_PROXIES.
 	r.Use(RealClientIP(cfg.Server.TrustedProxies))
+	// Keep the WS ?token= JWT out of the access log; must precede the logger.
+	r.Use(RedactTokenInRequestURI)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))

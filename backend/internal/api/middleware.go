@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -448,6 +449,21 @@ func GetUserFromContext(ctx context.Context) *models.User {
 type contextUserKey struct{}
 
 // AuthMiddleware checks for valid authentication
+var tokenQueryRedact = regexp.MustCompile(`([?&]token=)[^&]*`)
+
+// RedactTokenInRequestURI rewrites r.RequestURI so a ?token= query value (used to
+// authenticate the WebSocket) doesn't land in the access log. r.URL is left
+// untouched, so WS auth still reads the real token. Must run before the request
+// logger.
+func RedactTokenInRequestURI(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.RequestURI, "token=") {
+			r.RequestURI = tokenQueryRedact.ReplaceAllString(r.RequestURI, "${1}REDACTED")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // WSTokenFromQuery lets a WebSocket client authenticate with a ?token= query
 // parameter, since browsers cannot set an Authorization header on a WebSocket.
 // When no Authorization header is present it copies the query token into one so
