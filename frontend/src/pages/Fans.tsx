@@ -7,10 +7,8 @@ import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../components/common/Toast';
 import { useFanHealth, FanState } from '../hooks/useFanHealth';
-import { ZoneLayoutEditor } from '../components/zones/ZoneLayoutEditor';
-import { ZoneLayout } from '../types/zone';
 import { FanStatus } from '../types/fan';
-import { AppSettings, DriverInfo } from '../types/settings';
+import { DriverInfo } from '../types/settings';
 import {
   Fan,
   Search,
@@ -18,7 +16,6 @@ import {
   Volume2,
   Sliders,
   RefreshCw,
-  Layers,
   RotateCcw,
   AlertTriangle,
 } from 'lucide-react';
@@ -37,7 +34,6 @@ export function Fans() {
   const [speedValue, setSpeedValue] = useState(50);
   const [editingFanLabel, setEditingFanLabel] = useState<FanStatus | null>(null);
   const [newLabel, setNewLabel] = useState('');
-  const [activeTab, setActiveTab] = useState<'fans' | 'zones'>('fans');
 
   const { data: fans, isLoading, refetch } = useQuery({
     queryKey: ['fans'],
@@ -45,17 +41,10 @@ export function Fans() {
     refetchInterval: 5000,
   });
 
-  const { data: settings } = useQuery<AppSettings>({
-    queryKey: ['settings'],
-    queryFn: settingsApi.get,
-  });
-
   const { data: drivers } = useQuery<DriverInfo[]>({
     queryKey: ['drivers'],
     queryFn: settingsApi.getAvailableDrivers,
   });
-
-  const zoneLayout = settings?.zone_layout ?? null;
 
   const detectMutation = useMutation({
     mutationFn: fansApi.detect,
@@ -75,15 +64,6 @@ export function Fans() {
       toast.success('Fan updated');
     },
     onError: (e: Error) => toast.error(`Could not update fan: ${e.message}`),
-  });
-
-  const updateSettingsMutation = useMutation({
-    mutationFn: settingsApi.update,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] });
-      toast.success('Zone layout saved');
-    },
-    onError: (e: Error) => toast.error(`Could not save zone layout: ${e.message}`),
   });
 
   const identifyMutation = useMutation({
@@ -157,14 +137,10 @@ export function Fans() {
     }
   };
 
-  const handleSaveZoneLayout = (layout: ZoneLayout) => {
-    updateSettingsMutation.mutate({ zone_layout: layout });
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-fg">Fans &amp; Zones</h1>
+        <h1 className="text-2xl font-bold text-fg">Fans</h1>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={() => refetch()} isLoading={isLoading}>
             <RefreshCw className="w-4 h-4 mr-2" />
@@ -177,34 +153,7 @@ export function Fans() {
         </div>
       </div>
 
-      {/* Tab Navigation */}
-      <div className="flex border-b border-surface-2">
-        <button
-          onClick={() => setActiveTab('fans')}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeTab === 'fans'
-              ? 'text-info border-b-2 border-info'
-              : 'text-muted hover:text-fg-2'
-          }`}
-        >
-          <Fan className="w-4 h-4 inline mr-2" />
-          Fans
-        </button>
-        <button
-          onClick={() => setActiveTab('zones')}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeTab === 'zones'
-              ? 'text-info border-b-2 border-info'
-              : 'text-muted hover:text-fg-2'
-          }`}
-        >
-          <Layers className="w-4 h-4 inline mr-2" />
-          Zone Naming
-        </button>
-      </div>
-
-      {activeTab === 'fans' ? (
-        <div className="space-y-6">
+      <div className="space-y-6">
           {sortedFans.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {sortedFans.map((fan) => (
@@ -257,22 +206,6 @@ export function Fans() {
             </div>
           )}
         </div>
-      ) : (
-        <Card title="Zone Naming (advanced)">
-          <div className="space-y-4">
-            <p className="text-sm text-muted">
-              Fans are assigned to control zones directly on the Fans tab. This optional editor
-              lets you define named zone groupings used by older profiles.
-            </p>
-            <ZoneLayoutEditor
-              zoneLayout={zoneLayout}
-              onSave={handleSaveZoneLayout}
-              fans={mergedFans}
-              isSaving={updateSettingsMutation.isPending}
-            />
-          </div>
-        </Card>
-      )}
 
       {/* Edit Label Modal */}
       <Modal isOpen={!!editingFanLabel} onClose={() => setEditingFanLabel(null)} title="Edit Fan Label">
