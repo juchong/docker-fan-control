@@ -6,6 +6,7 @@ import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../components/common/Toast';
+import { HelpTip } from '../components/common/HelpTip';
 import { useFanHealth, FanState } from '../hooks/useFanHealth';
 import { FanStatus } from '../types/fan';
 import { DriverInfo } from '../types/settings';
@@ -369,7 +370,21 @@ function FanCard({ fan, zones, state, onEditLabel, onIdentify, onSetSpeed, onAss
             <p className="text-2xl font-bold text-fg">
               {fan.current_duty != null && fan.current_duty >= 0 ? fan.current_duty : '—'}
             </p>
-            <p className="text-xs text-muted">Duty %{fan.control_mode === 'firmware' ? ' (firmware)' : ''}</p>
+            {/* Same one-line label on every card; the control mode lives in the
+                tooltip so a firmware-managed fan doesn't get a taller tile. */}
+            <p className="text-xs text-muted inline-flex items-center gap-1">
+              Duty %
+              <HelpTip
+                label="Duty"
+                text={
+                  fan.control_mode === 'firmware'
+                    ? "On the board's own fan curve — no profile or override targets this zone. The value is the chip's readback, which can be approximate on ITE chips; “—” means it cannot be read."
+                    : fan.manual_override
+                      ? 'Set by a manual override from this page. Use Speed → Reset to auto to hand the fan back.'
+                      : 'Commanded by this app: a profile targets this zone.'
+                }
+              />
+            </p>
           </div>
         </div>
 
