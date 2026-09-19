@@ -124,7 +124,7 @@ function CollapsibleSection({
           <span className="font-medium text-fg-2">{title}</span>
           <span className="text-sm text-muted">({count})</span>
           {maxTemp !== undefined && maxTemp > 0 && (
-            <span className={`text-sm font-medium ${tempTextClass(maxTemp)}`}>Max: {maxTemp}°C</span>
+            <span className={`text-sm font-medium ${tempTextClass(maxTemp)}`}>Max: {maxTemp.toFixed(1)}°C</span>
           )}
         </div>
         {expanded ? (
@@ -393,16 +393,16 @@ export function Dashboard() {
               iconColor="text-info"
             >
               {monitoring.system.cpu_packages.map((cpu) => (
-                <div key={cpu.index} className="flex items-center justify-between p-3 bg-surface-2/50 rounded-lg">
+                <div key={cpu.index} className="flex items-start justify-between gap-3 p-3 bg-surface-2/50 rounded-lg">
                   <div className="min-w-0">
-                    <p className="font-medium text-fg-2 truncate" title={cpu.model || cpu.name}>
-                      {cpu.model || cpu.name}
-                    </p>
+                    {/* Model names run long ("AMD Ryzen Threadripper 9960X 24-Cores");
+                        wrap rather than truncate so the whole name is readable. */}
+                    <p className="font-medium text-fg-2 break-words">{cpu.model || cpu.name}</p>
                     <p className="text-sm text-muted">
                       {cpu.model ? cpu.name : `CPU ${cpu.index}`}
                     </p>
                   </div>
-                  <p className={`text-xl font-bold ${tempTextClass(cpu.temperature)}`}>{cpu.temperature.toFixed(0)}°C</p>
+                  <p className={`text-xl font-bold shrink-0 ${tempTextClass(cpu.temperature)}`}>{cpu.temperature.toFixed(0)}°C</p>
                 </div>
               ))}
             </CollapsibleSection>
