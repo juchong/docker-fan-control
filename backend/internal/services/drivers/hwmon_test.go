@@ -125,8 +125,12 @@ func TestHwmonMultiChipIdentity(t *testing.T) {
 	}
 
 	layout := d.buildZoneLayout()
-	if len(layout.Zones) != 10 || layout.Zones[5].Chip != "it87952" || layout.Zones[5].Name != "it87952 pwm1" {
+	if len(layout.Zones) != 10 || layout.Zones[5].Chip != "it87952" || layout.Zones[5].Name != "it87952 fan1" {
 		t.Errorf("zone layout: %+v", layout.Zones)
+	}
+	// The zone is named like the fan it drives so both pages show one name.
+	if fans[5].Name != layout.Zones[5].Name {
+		t.Errorf("fan name %q != zone name %q", fans[5].Name, layout.Zones[5].Name)
 	}
 	caps := d.capsLocked()
 	if caps.MaxZones != 10 || !caps.PerZoneFirmwareFallback {

@@ -285,7 +285,8 @@ func (d *HwmonDriver) capsLocked() services.DriverCapabilities {
 // buildZoneLayout exposes one zone per PWM channel across all chips. The zone
 // ID encodes chip slot and hardware channel (never a slice position), so a
 // profile's stored zone keeps addressing the same physical header even if the
-// set of present channels changes between detections.
+// set of present channels changes between detections. A zone is named like
+// the fan it drives ("it8689 fan1") so the Profiles and Fans pages agree.
 func (d *HwmonDriver) buildZoneLayout() services.ZoneLayout {
 	zones := make([]services.ZoneDefinition, 0, d.channelCountLocked())
 	idx := 0
@@ -293,7 +294,7 @@ func (d *HwmonDriver) buildZoneLayout() services.ZoneLayout {
 		for _, ch := range c.channels {
 			zones = append(zones, services.ZoneDefinition{
 				ID:          zoneID(c.slot, ch),
-				Name:        fmt.Sprintf("%s pwm%d", c.key, ch),
+				Name:        c.displayName(ch),
 				FanIndices:  []int{idx},
 				Description: fmt.Sprintf("pwm%d on %s (%s)", ch, c.name, c.dir),
 				IsDefault:   idx == 0,
@@ -331,7 +332,10 @@ func (c *hwmonChip) attr(ch int, suffix string) string {
 	return filepath.Join(c.dir, fmt.Sprintf("pwm%d%s", ch, suffix))
 }
 
-func (c *hwmonChip) sensorID(ch int) string { return fmt.Sprintf("%s/fan%d", c.key, ch) }
+// sensorID is the stable join key ("it8689/fan1"); displayName is the human
+// name used for both the detected fan and its zone ("it8689 fan1").
+func (c *hwmonChip) sensorID(ch int) string    { return fmt.Sprintf("%s/fan%d", c.key, ch) }
+func (c *hwmonChip) displayName(ch int) string { return fmt.Sprintf("%s fan%d", c.key, ch) }
 
 func readInt(path string) (int, bool) {
 	b, err := os.ReadFile(path)
@@ -501,7 +505,7 @@ func (d *HwmonDriver) DetectFans(ctx context.Context) ([]models.DetectedFan, err
 			}
 			fans = append(fans, models.DetectedFan{
 				SensorID:  c.sensorID(ch),
-				Name:      c.sensorID(ch),
+				Name:      c.displayName(ch),
 				RPM:       rpm,
 				DutyCycle: duty,
 				Chip:      c.key,

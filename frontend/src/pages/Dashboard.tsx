@@ -331,7 +331,7 @@ export function Dashboard() {
                       ) : (
                         <>
                           <Layers className="w-3 h-3" />
-                          {fan.chip && fan.channel != null ? `${fan.chip} pwm${fan.channel}` : `Zone ${fan.ipmi_zone}`}
+                          {fan.channel != null ? `pwm${fan.channel}` : `Zone ${fan.ipmi_zone}`}
                         </>
                       )}
                     </span>

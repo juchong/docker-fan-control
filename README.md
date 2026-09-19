@@ -207,8 +207,8 @@ All configuration is environment variables. See [`env.example`](env.example).
 2. **Identify & label** — *Identify* briefly spins a fan so you can tell which is
    which, then give it a friendly label.
 3. **Assign zones** — each fan card has a control-zone selector. On hwmon each
-   fan is already its own zone (named after its chip and channel, e.g.
-   `it87952 pwm1`); group fans by pointing a profile at several zones.
+   fan is already its own zone and carries the same name as the fan (e.g.
+   `it87952 fan1`); group fans by pointing a profile at several zones.
 4. **Create a profile** — pick an algorithm, choose input sensors (GPU/CPU/drive/
    board temps and GPU/CPU load), set the curve, pick target zones, and tune the
    advanced options (smoothing, min-run, hysteresis, priority). Every field has

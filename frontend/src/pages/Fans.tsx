@@ -334,11 +334,7 @@ function FanCard({ fan, zones, state, onEditLabel, onIdentify, onSetSpeed, onAss
               <h3 className="font-semibold text-fg-2">{fan.label || fan.ipmi_sensor_id}</h3>
               <p className="text-sm text-muted">
                 {fan.ipmi_sensor_id}
-                {fan.channel != null && (
-                  <span className="ml-1 text-muted-2">
-                    · {fan.chip ? `${fan.chip} ` : ''}pwm{fan.channel}
-                  </span>
-                )}
+                {fan.channel != null && <span className="ml-1 text-muted-2">· pwm{fan.channel}</span>}
               </p>
             </div>
           </div>
@@ -397,17 +393,26 @@ function FanCard({ fan, zones, state, onEditLabel, onIdentify, onSetSpeed, onAss
           </select>
         </div>
 
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" className="flex-1" onClick={onEditLabel}>
-            <Edit2 className="w-4 h-4 mr-1" />
+        {/* Wrapping row: three across when the card is wide enough, otherwise
+            the last button drops to its own line. A non-wrapping flex row
+            overflowed the card, since flex-1 can't shrink below the label. */}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" className="flex-1 min-w-[6.5rem] whitespace-nowrap" onClick={onEditLabel}>
+            <Edit2 className="w-4 h-4 mr-1 shrink-0" />
             Label
           </Button>
-          <Button variant="secondary" size="sm" className="flex-1" onClick={onIdentify} isLoading={isIdentifying}>
-            <Volume2 className="w-4 h-4 mr-1" />
+          <Button
+            variant="secondary"
+            size="sm"
+            className="flex-1 min-w-[6.5rem] whitespace-nowrap"
+            onClick={onIdentify}
+            isLoading={isIdentifying}
+          >
+            <Volume2 className="w-4 h-4 mr-1 shrink-0" />
             Identify
           </Button>
-          <Button variant="secondary" size="sm" className="flex-1" onClick={onSetSpeed}>
-            <Sliders className="w-4 h-4 mr-1" />
+          <Button variant="secondary" size="sm" className="flex-1 min-w-[6.5rem] whitespace-nowrap" onClick={onSetSpeed}>
+            <Sliders className="w-4 h-4 mr-1 shrink-0" />
             Speed
           </Button>
         </div>
