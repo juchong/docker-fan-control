@@ -20,13 +20,26 @@ export interface CPUPackageMetrics {
   temperature: number;
 }
 
+export interface DriveSensor {
+  label: string;
+  temperature: number;
+}
+
 export interface DriveMetrics {
   index: number;
   device: string;
   model: string;
   serial?: string;
+  firmware?: string;
   type: 'hdd' | 'ssd' | 'nvme';
+  /** Celsius; for NVMe the drive's Composite channel. */
   temperature: number;
+  /** The drive's own warning / critical thresholds, when it reports them. */
+  max?: number;
+  crit?: number;
+  /** Additional channels (NVMe "Sensor 1", "Sensor 2"). */
+  sensors?: DriveSensor[];
+  source?: 'hwmon' | 'smartctl';
 }
 
 export interface BoardTempMetrics {

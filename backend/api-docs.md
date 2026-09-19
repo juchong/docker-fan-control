@@ -367,10 +367,19 @@ GET /api/monitoring/metrics
     "drives": [
       {
         "index": 0,
-        "device": "/dev/sda",
-        "model": "Samsung SSD 860 EVO 1TB",
-        "temperature": 35,
-        "health": "good"
+        "device": "/dev/nvme0n1",
+        "model": "Samsung SSD 990 PRO 4TB",
+        "serial": "S7KG...",
+        "firmware": "4B2QJXD7",
+        "type": "nvme",
+        "temperature": 43,
+        "max": 82,
+        "crit": 85,
+        "sensors": [
+          { "label": "Sensor 1", "temperature": 42.85 },
+          { "label": "Sensor 2", "temperature": 46.85 }
+        ],
+        "source": "hwmon"
       }
     ],
     "cpu_load": 45.5,

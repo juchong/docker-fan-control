@@ -86,6 +86,10 @@ state persists across cycles; they're pruned only from the control goroutine.
   mode return a stale/ENODATA `pwmN`; the driver reports duty `-1` and
   `control_mode=firmware`. After `overrideAfter` mismatching readbacks the chip
   is reported via `DriverWarnings()` → `controller.driver_warnings` → the UI banner.
+- **Drive temps come from hwmon** (`nvme` chips, `drivetemp` for SATA/SAS) through
+  `/sys`; the container has no `/dev` block nodes by design. `smartctl` runs only
+  as a fallback when `/dev` does have them. Drives are ordered by device name,
+  never hwmonN — profile inputs are `drive_temp<index>` by slice position.
 - **Inputs may mix units.** Temps are °C, load is %. Load is projected onto the
   profile's curve axis in `calculateInputValue` (`profileInputAxis`) so it can be
   aggregated with temps. Keep temperature-only profiles byte-identical (only load

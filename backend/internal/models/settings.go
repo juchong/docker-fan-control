@@ -182,12 +182,23 @@ type CPUPackageMetrics struct {
 
 // DriveMetrics represents metrics for a single storage drive
 type DriveMetrics struct {
-	Index       int    `json:"index"`
-	Device      string `json:"device"`           // e.g., "/dev/sda"
-	Model       string `json:"model"`            // e.g., "WD Red 4TB"
-	Serial      string `json:"serial,omitempty"` // Drive serial number
-	Type        string `json:"type"`             // "hdd", "ssd", "nvme"
-	Temperature int    `json:"temperature"`      // Celsius
+	Index       int           `json:"index"`
+	Device      string        `json:"device"`             // e.g., "/dev/sda", "/dev/nvme0n1"
+	Model       string        `json:"model"`              // e.g., "WD Red 4TB"
+	Serial      string        `json:"serial,omitempty"`   // Drive serial number
+	Firmware    string        `json:"firmware,omitempty"` // Firmware revision, when the source reports it
+	Type        string        `json:"type"`               // "hdd", "ssd", "nvme"
+	Temperature int           `json:"temperature"`        // Celsius (NVMe: the Composite channel)
+	Max         *int          `json:"max,omitempty"`      // the drive's own warning threshold, if reported
+	Crit        *int          `json:"crit,omitempty"`     // the drive's own critical threshold, if reported
+	Sensors     []DriveSensor `json:"sensors,omitempty"`  // additional channels (NVMe "Sensor 1", "Sensor 2")
+	Source      string        `json:"source,omitempty"`   // "hwmon" or "smartctl"
+}
+
+// DriveSensor is one extra temperature channel of a drive.
+type DriveSensor struct {
+	Label       string  `json:"label"`
+	Temperature float64 `json:"temperature"` // Celsius
 }
 
 // ControllerState represents the fan controller state

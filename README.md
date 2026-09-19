@@ -23,7 +23,7 @@ It works on two very different classes of hardware:
   boards, or vendor IPMI for servers. The right one is selected at startup; you
   can override it in Settings.
 - **Rich monitoring** — NVIDIA GPU temp/load/memory/power (NVML), CPU package
-  temps (Intel/AMD), drive temps (SMART), motherboard/VRM/chipset temps, and
+  temps (Intel/AMD), drive temps (NVMe/SATA via hwmon), motherboard/VRM/chipset temps, and
   CPU/GPU load.
 - **Profiles with three algorithms** — **Linear**, **Step**, and **PID** — built
   in a sectioned editor with a live curve preview, a "you are here" marker driven
@@ -131,6 +131,14 @@ loaded.
 
 `apparmor=unconfined` is much narrower than `privileged: true`; it only lifts the
 MAC layer that denies `/sys` writes.
+
+Drive temperatures come from the same `/sys` mount, so no `/dev` access is
+needed: NVMe drives are exposed by the kernel's built-in `nvme` hwmon
+(Composite temperature plus the drive's own warning/critical thresholds), and
+SATA/SAS drives by the `drivetemp` module — load it on the host
+(`echo drivetemp | sudo tee /etc/modules-load.d/drivetemp.conf`). `smartctl` is
+only used as a fallback for drives hwmon doesn't cover, and only when the
+container is actually given block devices.
 
 Every controllable chip is bound — a board with two Super-I/O chips gets all of
 its headers. Channels that no profile or manual override targets **stay on the

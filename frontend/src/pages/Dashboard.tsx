@@ -1,6 +1,7 @@
 import { useState, lazy, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMonitoring } from '../hooks/useMonitoring';
+import type { DriveMetrics } from '../types/monitoring';
 import { useMetricsHistory } from '../hooks/useMetricsHistory';
 import { useFanHealth } from '../hooks/useFanHealth';
 import { Card } from '../components/common/Card';
@@ -50,6 +51,25 @@ const TONE_TEXT: Record<Tone, string> = {
 
 function tempTextClass(temp: number): string {
   return TONE_TEXT[tempTone(temp)];
+}
+
+// Drives report their own warning/critical thresholds (NVMe always does);
+// prefer those over the generic bands, which would flag a healthy 70 °C SSD.
+function driveTone(d: DriveMetrics): Tone {
+  const t = d.temperature;
+  if (d.crit != null && t >= d.crit) return 'danger';
+  if (d.max != null && t >= d.max) return 'warn';
+  if (d.max != null || d.crit != null) return tempTone(t) === 'info' ? 'info' : 'ok';
+  return tempTone(t);
+}
+
+function driveTooltip(d: DriveMetrics): string {
+  const parts = (d.sensors ?? []).map((s) => `${s.label}: ${s.temperature.toFixed(1)} °C`);
+  if (d.max != null) parts.push(`warning at ${d.max} °C`);
+  if (d.crit != null) parts.push(`critical at ${d.crit} °C`);
+  if (d.serial) parts.push(`S/N ${d.serial}`);
+  if (d.firmware) parts.push(`fw ${d.firmware}`);
+  return parts.join(' · ');
 }
 
 function formatBytes(bytes: number): string {
@@ -422,17 +442,21 @@ export function Dashboard() {
               iconColor="text-info"
             >
               {monitoring.system.drives.map((drive) => (
-                <div key={drive.index} className="flex items-center justify-between p-3 bg-surface-2/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <HardDrive className="w-5 h-5 text-muted" />
-                    <div>
-                      <p className="font-medium text-fg-2">{drive.model || drive.device}</p>
+                <div
+                  key={drive.index}
+                  className="flex items-start justify-between gap-3 p-3 bg-surface-2/50 rounded-lg"
+                  title={driveTooltip(drive) || undefined}
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <HardDrive className="w-5 h-5 text-muted shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="font-medium text-fg-2 break-words">{drive.model || drive.device}</p>
                       <p className="text-sm text-muted">
-                        {drive.device} • {drive.type.toUpperCase()}
+                        {drive.device.replace(/^\/dev\//, '')} • {drive.type.toUpperCase()}
                       </p>
                     </div>
                   </div>
-                  <p className={`text-xl font-bold ${tempTextClass(drive.temperature)}`}>{drive.temperature}°C</p>
+                  <p className={`text-xl font-bold shrink-0 ${TONE_TEXT[driveTone(drive)]}`}>{drive.temperature}°C</p>
                 </div>
               ))}
             </CollapsibleSection>
