@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"docker-fan-control/internal/models"
@@ -49,6 +50,62 @@ func TestValidateZones(t *testing.T) {
 	}
 	if err := v.validateZones([]int{8}); err == nil {
 		t.Error("a zone not in the driver layout should be rejected")
+	}
+}
+
+// The wrapped profile error must name the failing check: the API returns
+// err.Error() as the 400 body, and a bare "profile validation failed" left
+// users guessing why a save was rejected.
+func TestValidationErrorIncludesDetails(t *testing.T) {
+	v := validatorWithZones(1, 2, 3)
+	err := v.ValidateProfile(&models.Profile{
+		Name:            "x",
+		Algorithm:       "linear",
+		AlgorithmParams: models.AlgorithmParams{"min_temp": 30.0, "max_temp": 80.0, "min_speed": 30.0, "max_speed": 100.0},
+		Zones:           []int{2, 7},
+		Inputs:          []models.ProfileInput{{InputType: models.InputTypeCPUTemp, Weight: 0}},
+	})
+	if err == nil {
+		t.Fatal("expected a validation error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"zone 7 does not exist", "weight must be > 0"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q should mention %q", msg, want)
+		}
+	}
+}
+
+// A partial update is validated against the stored profile, so a zones-only
+// PUT must not fail on the name/algorithm it never sent — but it must still
+// reject a resulting profile that keeps a zone this board doesn't have.
+func TestValidateProfileUpdateMergesExisting(t *testing.T) {
+	v := validatorWithZones(1, 2, 3)
+	existing := &models.Profile{
+		Name:            "CPU",
+		Algorithm:       "linear",
+		AlgorithmParams: models.AlgorithmParams{"min_temp": 30.0, "max_temp": 80.0, "min_speed": 30.0, "max_speed": 100.0},
+		Zones:           []int{2, 7}, // 7 is stale
+		Inputs:          []models.ProfileInput{{InputType: models.InputTypeCPUTemp, Weight: 1}},
+	}
+
+	// Re-pointing the zones alone is a valid update.
+	zones := []int{1, 2}
+	if err := v.ValidateProfileUpdate(existing, &models.UpdateProfileRequest{Zones: &zones}); err != nil {
+		t.Errorf("zones-only update should pass: %v", err)
+	}
+	// An update that leaves the stale zone in place names it and nothing else.
+	prio := 1
+	err := v.ValidateProfileUpdate(existing, &models.UpdateProfileRequest{Priority: &prio})
+	if err == nil {
+		t.Fatal("expected the stale zone to be rejected")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "zone 7") || strings.Contains(msg, "name is required") {
+		t.Errorf("unexpected error: %s", msg)
+	}
+	// The stored profile itself is not mutated by validation.
+	if len(existing.Zones) != 2 || existing.Zones[1] != 7 || existing.Priority != 0 {
+		t.Errorf("existing profile was mutated: %+v", existing)
 	}
 }
 

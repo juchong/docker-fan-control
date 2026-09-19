@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"docker-fan-control/internal/database"
 	"docker-fan-control/internal/models"
@@ -17,8 +18,32 @@ type ValidationError struct {
 	Details interface{}
 }
 
+// Error renders the error with its nested details, so an API client sees
+// *which* check failed ("zones: zone 7 does not exist ...") rather than only
+// the generic "profile validation failed" wrapper.
 func (e *ValidationError) Error() string {
-	return fmt.Sprintf("validation error on %s: %s", e.Field, e.Message)
+	msg := fmt.Sprintf("validation error on %s: %s", e.Field, e.Message)
+	if parts := e.detailStrings(); len(parts) > 0 {
+		msg += " (" + strings.Join(parts, "; ") + ")"
+	}
+	return msg
+}
+
+// detailStrings flattens nested Details into "field: message" strings.
+func (e *ValidationError) detailStrings() []string {
+	details, ok := e.Details.([]*ValidationError)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, d := range details {
+		if nested := d.detailStrings(); len(nested) > 0 {
+			out = append(out, nested...)
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s: %s", d.Field, d.Message))
+	}
+	return out
 }
 
 // ProfileValidator validates profile configurations
@@ -550,46 +575,50 @@ func (v *ProfileValidator) ValidateProfileRequest(req *models.CreateProfileReque
 	return v.ValidateProfile(profile)
 }
 
-// ValidateProfileUpdate validates a profile update request
-func (v *ProfileValidator) ValidateProfileUpdate(req *models.UpdateProfileRequest) error {
-	// Create a minimal profile for validation
-	profile := &models.Profile{
-		Algorithm:       "", // Will be set if provided
-		AlgorithmParams: make(models.AlgorithmParams),
-		Priority:        0,
-		Zones:           []int{},
-		Inputs:          []models.ProfileInput{},
-	}
+// ValidateProfileUpdate validates a partial update by applying it to the
+// stored profile and validating the result. Validating the request fields
+// over blanks (as this used to) rejected every PUT that didn't resend name and
+// algorithm; validating the merged profile also catches an update that would
+// leave a now-invalid field (e.g. a zone from a previous board) in place.
+func (v *ProfileValidator) ValidateProfileUpdate(existing *models.Profile, req *models.UpdateProfileRequest) error {
+	merged := *existing
+	merged.Inputs = append([]models.ProfileInput(nil), existing.Inputs...)
 
 	if req.Name != nil {
-		profile.Name = *req.Name
+		merged.Name = *req.Name
+	}
+	if req.Description != nil {
+		merged.Description = *req.Description
 	}
 	if req.Algorithm != nil {
-		profile.Algorithm = *req.Algorithm
+		merged.Algorithm = *req.Algorithm
 	}
 	if req.AlgorithmParams != nil {
-		profile.AlgorithmParams = *req.AlgorithmParams
+		merged.AlgorithmParams = *req.AlgorithmParams
 	}
 	if req.Priority != nil {
-		profile.Priority = *req.Priority
+		merged.Priority = *req.Priority
 	}
 	if req.Zones != nil {
-		profile.Zones = *req.Zones
+		merged.Zones = *req.Zones
 	}
 	if req.Inputs != nil {
-		profile.Inputs = *req.Inputs
+		merged.Inputs = *req.Inputs
+	}
+	if req.SmoothTransition != nil {
+		merged.SmoothTransition = *req.SmoothTransition
 	}
 	if req.TransitionTime != nil {
-		profile.TransitionTime = *req.TransitionTime
+		merged.TransitionTime = *req.TransitionTime
 	}
 	if req.MinRunTime != nil {
-		profile.MinRunTime = *req.MinRunTime
+		merged.MinRunTime = *req.MinRunTime
 	}
 	if req.Hysteresis != nil {
-		profile.Hysteresis = *req.Hysteresis
+		merged.Hysteresis = *req.Hysteresis
 	}
 
-	return v.ValidateProfile(profile)
+	return v.ValidateProfile(&merged)
 }
 
 // IsValidationError checks if an error is a ValidationError

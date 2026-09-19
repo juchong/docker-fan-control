@@ -125,15 +125,15 @@ func (s *ProfileService) Create(ctx context.Context, req *models.CreateProfileRe
 // Update updates a profile
 func (s *ProfileService) Update(ctx context.Context, id uint, req *models.UpdateProfileRequest) (*models.Profile, error) {
 	var profile models.Profile
-	if err := database.DB.First(&profile, id).Error; err != nil {
+	if err := database.DB.Preload("Inputs").First(&profile, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrProfileNotFound
 		}
 		return nil, err
 	}
 
-	// Validate profile request
-	if err := s.validator.ValidateProfileUpdate(req); err != nil {
+	// Validate the profile as it will be after this (possibly partial) update.
+	if err := s.validator.ValidateProfileUpdate(&profile, req); err != nil {
 		return nil, err
 	}
 

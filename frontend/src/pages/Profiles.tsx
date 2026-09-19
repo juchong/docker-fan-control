@@ -478,6 +478,14 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
   };
 
   // Client-side validation mirroring the backend.
+  // Zones the saved profile targets that the active driver no longer exposes
+  // (a board or chip change). The picker can't show them, so they'd be sent
+  // back on every save and rejected; list them and drop them when saving.
+  const staleZones = useMemo(
+    () => (zones.length > 0 ? selectedZones.filter((id) => !zones.some((z) => z.id === id)) : []),
+    [zones, selectedZones]
+  );
+
   const validationError = useMemo((): string | null => {
     if (!name.trim()) return 'Name is required';
     if (name.length > 100) return 'Name must be 100 characters or fewer';
@@ -533,7 +541,7 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
     algorithmParams.input_aggregation = inputAggregation;
     onSave({
       name, description: description || undefined, algorithm, algorithm_params: algorithmParams,
-      priority, zones: selectedZones, inputs: selectedInputs,
+      priority, zones: selectedZones.filter((z) => !staleZones.includes(z)), inputs: selectedInputs,
       smooth_transition: smoothTransition, transition_time: transitionTime,
       min_run_time: minRunTime, hysteresis,
     });
@@ -738,8 +746,17 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
                   </label>
                 ))}
               </div>
+              {staleZones.length > 0 && (
+                <p className="text-xs text-warn mt-2" role="status">
+                  This profile still targets {staleZones.map((z) => `Zone ${z}`).join(', ')}, which no longer
+                  exist on this board (the hardware or its channel numbering changed). They will be dropped
+                  when you save — pick the replacement zones above.
+                </p>
+              )}
               <p className="text-xs text-muted-2 mt-2">
-                {selectedZones.length === 0 ? 'No zones selected' : `Controls ${selectedZones.length} zone(s)`}
+                {selectedZones.length - staleZones.length === 0
+                  ? 'No zones selected'
+                  : `Controls ${selectedZones.length - staleZones.length} zone(s)`}
               </p>
             </>
           ) : (
