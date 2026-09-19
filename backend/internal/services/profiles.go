@@ -7,6 +7,7 @@ import (
 	"docker-fan-control/internal/database"
 	"docker-fan-control/internal/models"
 
+	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 )
 
@@ -297,6 +298,7 @@ func (s *FanService) SaveDetectedFans(ctx context.Context, detected []models.Det
 			fan = models.Fan{
 				IPMISensorID: d.SensorID,
 				DetectedName: d.Name,
+				Chip:         d.Chip,
 			}
 			if ch > 0 {
 				c := ch
@@ -313,6 +315,10 @@ func (s *FanService) SaveDetectedFans(ctx context.Context, detected []models.Det
 			changed := false
 			if fan.DetectedName != d.Name {
 				fan.DetectedName = d.Name
+				changed = true
+			}
+			if fan.Chip != d.Chip {
+				fan.Chip = d.Chip
 				changed = true
 			}
 			if ch > 0 {
@@ -333,6 +339,25 @@ func (s *FanService) SaveDetectedFans(ctx context.Context, detected []models.Det
 		}
 
 		savedFans = append(savedFans, fan)
+	}
+
+	// Prune rows for fans the driver no longer reports (a board or chip
+	// change leaves the old sensors behind otherwise). Only when this scan
+	// found something, so a transiently empty detection can't wipe labels.
+	if len(detected) > 0 {
+		ids := make([]string, 0, len(detected))
+		for _, d := range detected {
+			ids = append(ids, d.SensorID)
+		}
+		var stale []models.Fan
+		if err := database.DB.Where("ipmi_sensor_id NOT IN ?", ids).Find(&stale).Error; err == nil && len(stale) > 0 {
+			for _, f := range stale {
+				log.Info().Str("sensor_id", f.IPMISensorID).Str("label", f.Label).Msg("Removing fan no longer reported by the driver")
+			}
+			if err := database.DB.Delete(&stale).Error; err != nil {
+				log.Warn().Err(err).Msg("Failed to prune stale fans")
+			}
+		}
 	}
 
 	return savedFans, nil

@@ -241,10 +241,12 @@ GET /api/fans
 [
   {
     "id": 1,
-    "ipmi_sensor_id": "FAN1",
+    "ipmi_sensor_id": "it8689/fan1",
     "label": "CPU Fan",
-    "ipmi_zone": 0,
-    "detected_name": "FAN1"
+    "ipmi_zone": 1,
+    "chip": "it8689",
+    "channel": 1,
+    "detected_name": "it8689/fan1"
   }
 ]
 ```
@@ -492,7 +494,14 @@ PUT /api/settings
 - `is_default` marks the primary zone
 - Zone IDs are **driver-owned** and must match the active driver's
   `GetZoneLayout()` — they are validated by membership, not by a numeric range.
-  For the hwmon driver a zone ID is the PWM channel number.
+  For the hwmon driver a zone ID is `chipSlot*100 + PWM channel` (a single-chip
+  board uses `1..N`; a second chip `101..1xx`). Each zone carries an optional
+  `chip` (e.g. `it87952`).
+- Fan objects carry `chip` and `channel` (display only) and fan status carries
+  `control_mode` (`manual` = commanded by this app or an override, `firmware` =
+  the board's own curve) and `current_duty` `-1` when the driver cannot read it.
+  `controller.driver_warnings` (monitoring payload) lists live driver health
+  issues such as *firmware is overriding fan writes on it8689 pwm1*.
 
 ### Test IPMI Connection
 

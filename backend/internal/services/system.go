@@ -83,23 +83,25 @@ func (s *SystemService) GetMetrics() (*models.SystemMetrics, error) {
 	return metrics, nil
 }
 
-// GetBoardTemperatures returns motherboard/VRM/chipset temperatures from a
-// Nuvoton Super-I/O chip (nct6xxx). Aux/unconnected channels commonly read
-// bogus values (0, ~127, or negative), so readings outside a plausible range
-// are dropped. These are exposed as OPT-IN profile inputs only and never drive
-// the emergency threshold (see controller.getMaxTemperature).
+// GetBoardTemperatures returns motherboard/VRM/chipset temperatures from the
+// Super-I/O chips (Nuvoton nct6xxx, ITE it8xxx — every chip, on boards with
+// more than one). Aux/unconnected channels commonly read bogus values (0,
+// ~127, or -55), so readings outside a plausible range are dropped. These are
+// exposed as OPT-IN profile inputs only and never drive the emergency
+// threshold (see controller.getMaxTemperature).
 func (s *SystemService) GetBoardTemperatures() []models.BoardTempMetrics {
 	var temps []models.BoardTempMetrics
 	idx := 0
 
 	hwmonPaths, _ := filepath.Glob("/sys/class/hwmon/hwmon*/name")
+	sort.Strings(hwmonPaths)
 	for _, namePath := range hwmonPaths {
 		data, err := os.ReadFile(namePath)
 		if err != nil {
 			continue
 		}
 		name := strings.TrimSpace(string(data))
-		if !strings.HasPrefix(name, "nct6") {
+		if !strings.HasPrefix(name, "nct6") && !strings.HasPrefix(name, "it8") {
 			continue
 		}
 
@@ -129,7 +131,15 @@ func (s *SystemService) GetBoardTemperatures() []models.BoardTempMetrics {
 				label = strings.TrimSpace(string(lb))
 			}
 			if label == "" {
-				label = fmt.Sprintf("%s temp%d", name, idx)
+				// No label from the driver (it87 exposes none): name the sensor
+				// by chip and hardware number, e.g. "it8689 temp5", trimming
+				// Gigabyte's SIV suffix ("it8689_9a0a0908").
+				chip := name
+				if i := strings.IndexByte(chip, '_'); i > 0 {
+					chip = chip[:i]
+				}
+				n := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(tf), "temp"), "_input")
+				label = fmt.Sprintf("%s temp%s", chip, n)
 			}
 
 			temps = append(temps, models.BoardTempMetrics{

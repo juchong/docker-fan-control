@@ -10,6 +10,7 @@ type Fan struct {
 	IPMISensorID string    `json:"ipmi_sensor_id" gorm:"column:ipmi_sensor_id;not null"` // e.g., "Fan1 RPM"
 	IPMIZone     *int      `json:"ipmi_zone,omitempty" gorm:"column:ipmi_zone"`          // driver control zone (SetFanSpeed arg / GetZoneForFan)
 	Channel      *int      `json:"channel,omitempty" gorm:"column:channel"`             // hardware PWM channel (telemetry/display only)
+	Chip         string    `json:"chip,omitempty" gorm:"column:chip"`                   // controller chip the channel lives on (display only)
 	Label        string    `json:"label,omitempty"`                                      // User-defined label
 	DetectedName string    `json:"detected_name,omitempty" gorm:"column:detected_name"`  // Auto-detected name
 	CreatedAt    time.Time `json:"created_at"`
@@ -39,18 +40,27 @@ type FanStatus struct {
 	ManualOverride   bool   `json:"manual_override"`
 	IPMIZone         *int   `json:"ipmi_zone,omitempty"`       // driver control zone
 	Channel          *int   `json:"channel,omitempty"`         // hardware PWM channel (display only)
+	Chip             string `json:"chip,omitempty"`            // controller chip (display only)
+	ControlMode      string `json:"control_mode,omitempty"`    // FanControlManual / FanControlFirmware
 	AssignedProfiles []uint `json:"assigned_profiles,omitempty"`
 }
 
+// Fan control modes reported per channel by drivers that can tell.
+const (
+	FanControlManual   = "manual"   // duty is what this app (or a manual override) commanded
+	FanControlFirmware = "firmware" // the board's own automatic curve is driving the fan
+)
+
 // DetectedFan represents a fan found during a driver scan. The driver is the
-// single source of truth for the three identifier spaces: SensorID (the DB/
-// telemetry join key), Channel (the hardware PWM channel), and ZoneID (the
-// control target passed to SetFanSpeed / returned by GetZoneForFan).
+// single source of truth for the identifier spaces: SensorID (the DB/telemetry
+// join key), Chip+Channel (the hardware PWM channel), and ZoneID (the control
+// target passed to SetFanSpeed / returned by GetZoneForFan).
 type DetectedFan struct {
 	SensorID  string `json:"sensor_id"`
 	Name      string `json:"name"`
 	RPM       int    `json:"rpm"`
 	DutyCycle int    `json:"duty_cycle"` // 0-100, -1 if unknown
+	Chip      string `json:"chip"`       // controller chip the channel lives on; "" if N/A
 	Channel   int    `json:"channel"`    // hardware PWM channel (pwmN); 0 if N/A
 	ZoneID    int    `json:"zone_id"`    // control zone (SetFanSpeed arg); 0 if driver reports none
 	Status    string `json:"status"`     // "ok", "warning", "critical"

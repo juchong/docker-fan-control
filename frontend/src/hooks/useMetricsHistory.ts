@@ -68,7 +68,7 @@ export function recordSample(m: Monitoring | null) {
     cpu: max((m.system?.cpu_packages ?? []).map((c) => c.temperature)),
     drive: max((m.system?.drives ?? []).map((d) => d.temperature)),
     board: max((m.system?.board_temps ?? []).map((b) => b.temperature)),
-    duty: max((m.fans ?? []).map((f) => f.current_duty)),
+    duty: max((m.fans ?? []).map((f) => f.current_duty).filter((d) => d >= 0)),
     gpuLoad: max((m.gpus ?? []).map((g) => g.load)),
     cpuLoad: typeof m.system?.cpu_load === 'number' ? m.system.cpu_load : null,
   };

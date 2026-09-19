@@ -52,6 +52,8 @@ export interface DriverCapabilities {
   max_zones: number;
   max_fans: number;
   has_static_rpm_values: boolean;
+  /** Zones no profile/override targets stay on the board's own fan curve. */
+  firmware_fallback?: boolean;
 }
 
 export interface ControllerState {
@@ -66,6 +68,8 @@ export interface ControllerState {
   driver_vendor?: string;
   driver_model?: string;
   driver_capabilities?: DriverCapabilities;
+  /** Live driver health issues, e.g. firmware overriding PWM writes. */
+  driver_warnings?: string[];
 }
 
 

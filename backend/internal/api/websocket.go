@@ -211,9 +211,13 @@ func (h *WebSocketHandler) gatherMetrics() *models.Monitoring {
 			SupportsManualMode:       caps.SupportsManualMode,
 			SupportsDutyCycleReading: caps.SupportsDutyCycleReading,
 			SupportsPerZoneControl:   caps.SupportsPerZoneControl,
+			FirmwareFallback:         caps.PerZoneFirmwareFallback,
 			MaxZones:                 caps.MaxZones,
 			MaxFans:                  caps.MaxFans,
 			HasStaticRPMValues:       caps.HasStaticRPMValues,
+		}
+		if hr, ok := currentDriver.(services.HealthReporter); ok {
+			monitoring.Controller.DriverWarnings = hr.DriverWarnings()
 		}
 	}
 
@@ -239,12 +243,14 @@ func (h *WebSocketHandler) gatherMetrics() *models.Monitoring {
 			Label:          fan.DisplayName(),
 			IPMIZone:       fan.IPMIZone,
 			Channel:        fan.Channel,
+			Chip:           fan.Chip,
 			ManualOverride: h.controller.HasManualOverride(fan.ID),
 		}
 
 		if reading, ok := readings[fan.IPMISensorID]; ok {
 			status.CurrentRPM = reading.RPM
 			status.CurrentDuty = reading.DutyCycle
+			status.ControlMode = reading.ControlMode
 		}
 		if fan.IPMIZone != nil {
 			if t, ok := h.controller.GetZoneTarget(*fan.IPMIZone); ok {

@@ -69,11 +69,23 @@ state persists across cycles; they're pruned only from the control goroutine.
 ## Invariants — don't break these
 
 - **Zones are driver-defined.** `GetZoneLayout()` is the source of truth. Zone
-  IDs are stable and **owned by the driver** — for hwmon the ID is the **PWM
-  channel number**, not a slice index, so a saved profile keeps addressing the
-  same physical fan across re-detects. Validate zones by *membership* in the
-  active driver's layout, never a `0..MaxZones` range. `fan.ipmi_zone` == driver
-  zone ID.
+  IDs are stable and **owned by the driver** — for hwmon the ID is
+  `chipSlot*100 + PWM channel` (slot = the chip's position in name-sorted order,
+  so a single-chip board keeps IDs 1..N and a second chip gets 101..1xx), never
+  a slice index, so a saved profile keeps addressing the same physical header
+  across re-detects and reboots. Sensor IDs are `<chip>/fanN` (chip = hwmon name
+  up to its first `_`). Validate zones by *membership* in the active driver's
+  layout, never a `0..MaxZones` range. `fan.ipmi_zone` == driver zone ID.
+- **Untargeted hwmon channels stay on the firmware curve.** `SetManualMode(true)`
+  only opens a session; a channel goes manual on its first write and is released
+  (`pwmN_enable` restored — `5` nct6775 / `2` it87) by `SetManualMode(false)`,
+  `ReleaseZone`, or after `IdentifyZone`. `PerZoneFirmwareFallback` in the caps
+  makes the controller skip the all-fans startup floor. Never add code that
+  flips every channel to manual at start: the CPU fan may be on one.
+- **Readback is only trusted on channels we commanded.** ITE chips in firmware
+  mode return a stale/ENODATA `pwmN`; the driver reports duty `-1` and
+  `control_mode=firmware`. After `overrideAfter` mismatching readbacks the chip
+  is reported via `DriverWarnings()` → `controller.driver_warnings` → the UI banner.
 - **Inputs may mix units.** Temps are °C, load is %. Load is projected onto the
   profile's curve axis in `calculateInputValue` (`profileInputAxis`) so it can be
   aggregated with temps. Keep temperature-only profiles byte-identical (only load
@@ -90,10 +102,13 @@ state persists across cycles; they're pruned only from the control goroutine.
   cycle). Never let a redeploy strand fans at 100 %. The sensor-loss emergency
   must arm only after valid temps are seen, only for temp-using profiles, with a
   startup grace window (don't false-trip load-only profiles at boot). Board/VRM
-  temps must **not** feed the emergency max (nct6xxx aux sensors read bogus-high).
+  temps must **not** feed the emergency max (Super-I/O aux sensors read
+  bogus-high or -55 °C when unconnected).
 - **hwmon writes need a RW `/sys` and relaxed AppArmor** (`apparmor=unconfined`),
   not `privileged`. The driver captures each channel's original `pwmN_enable` to
-  restore firmware/auto control.
+  restore firmware/auto control. Gigabyte's newer ITE chips are only controllable
+  through the frankcrawford/it87 fork (MMIO) — the in-tree `it87` accepts the
+  write and the EC silently reverts it.
 - **Security:** client IP for rate limiting comes from `TRUSTED_PROXIES`-gated
   `X-Forwarded-For` (never blind `chi/middleware.RealIP`). `X-Forwarded-User` is
   honored only when `AUTH_PROXY_ENABLED`. CORS/WS origin checks are exact-host.

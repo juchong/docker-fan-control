@@ -48,12 +48,14 @@ func (h *FansHandler) List(w http.ResponseWriter, r *http.Request) {
 			Label:          fan.DisplayName(),
 			IPMIZone:       fan.IPMIZone,
 			Channel:        fan.Channel,
+			Chip:           fan.Chip,
 			ManualOverride: h.controller.HasManualOverride(fan.ID),
 		}
 
 		if rd, ok := readings[fan.IPMISensorID]; ok {
 			status.CurrentRPM = rd.RPM
 			status.CurrentDuty = rd.DutyCycle
+			status.ControlMode = rd.ControlMode
 		}
 		if fan.IPMIZone != nil {
 			if t, ok := h.controller.GetZoneTarget(*fan.IPMIZone); ok {
@@ -287,7 +289,7 @@ func (h *FansHandler) ClearSpeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.controller.ClearManualOverride(fan.ID)
+	h.controller.ClearManualOverride(r.Context(), fan.ID, fan.IPMIZone)
 	h.logger.Info(models.CategoryFan, "Manual fan override cleared", models.JSONMap{"fan_id": fan.ID})
 
 	writeJSON(w, map[string]any{"message": "Manual override cleared"})

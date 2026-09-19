@@ -37,6 +37,7 @@ type FanController struct {
 
 	// Current state
 	manualOverrides map[uint]manualOverride // fan ID -> override
+	staleZoneWarned map[int]bool            // zones already reported as missing from the driver layout
 	lastSpeeds      map[int]int  // zone -> percent
 	zoneLastChanged map[int]time.Time // zone -> last change time
 	zoneTargetSpeeds map[int]int  // zone -> target speed (for smoothing)
@@ -147,9 +148,60 @@ func (c *FanController) applyStartupSpeed(ctx context.Context) {
 		var count int64
 		database.DB.Model(&models.Profile{}).Where("is_active = ?", true).Count(&count)
 		if count == 0 {
+			if c.driverKeepsFirmwareFallback() {
+				log.Info().Msg("No active profile; fans stay under firmware automatic control (driver keeps untargeted zones on the firmware curve)")
+				return
+			}
 			_ = c.ipmi.SetAllFanSpeeds(ctx, safeFloor)
 		}
 	}
+}
+
+// presentZones returns the set of zone IDs the active driver exposes, or nil
+// when there is no driver/layout to filter against.
+func (c *FanController) presentZones() map[int]bool {
+	d := c.ipmi.GetCurrentDriver()
+	if d == nil {
+		return nil
+	}
+	layout := d.GetZoneLayout()
+	if len(layout.Zones) == 0 {
+		return nil
+	}
+	set := make(map[int]bool, len(layout.Zones))
+	for _, z := range layout.Zones {
+		set[z.ID] = true
+	}
+	return set
+}
+
+// warnStaleZone reports, once per zone, that a profile targets a zone the
+// active driver does not expose.
+func (c *FanController) warnStaleZone(zone int, profileID uint) {
+	c.mu.Lock()
+	if c.staleZoneWarned == nil {
+		c.staleZoneWarned = make(map[int]bool)
+	}
+	warned := c.staleZoneWarned[zone]
+	c.staleZoneWarned[zone] = true
+	c.mu.Unlock()
+	if warned {
+		return
+	}
+	log.Warn().Int("zone", zone).Uint("profile_id", profileID).
+		Msg("Profile targets a zone the active driver does not expose; skipping it — edit the profile's target zones")
+	c.logger.LogSystemEvent("Profile targets a missing zone", models.JSONMap{
+		"zone":       zone,
+		"profile_id": profileID,
+	})
+}
+
+// driverKeepsFirmwareFallback reports whether zones the controller never
+// commands remain under firmware automatic control (hwmon). Such drivers need
+// no all-fans startup floor: an untargeted fan is never left unmanaged.
+func (c *FanController) driverKeepsFirmwareFallback() bool {
+	d := c.ipmi.GetCurrentDriver()
+	return d != nil && d.GetCapabilities().PerZoneFirmwareFallback
 }
 
 // Stop gracefully stops the fan control loop, honoring the SafetyOnShutdown
@@ -228,12 +280,44 @@ func (c *FanController) SetManualOverride(fanID uint, percent int, duration time
 	c.mu.Unlock()
 }
 
-// ClearManualOverride removes a manual override for a fan, returning it to
-// automatic (profile) control on the next control cycle.
-func (c *FanController) ClearManualOverride(fanID uint) {
+// ClearManualOverride removes a manual override for a fan. The zone's command
+// history is forgotten so the next control cycle re-sends the profile target
+// (the "only send on change" check would otherwise leave the override value in
+// place), and if no active profile targets the zone it is handed back to
+// firmware automatic control on drivers that support that.
+func (c *FanController) ClearManualOverride(ctx context.Context, fanID uint, zone *int) {
 	c.mu.Lock()
 	delete(c.manualOverrides, fanID)
+	if zone != nil {
+		delete(c.lastSpeeds, *zone)
+		delete(c.zoneLastChanged, *zone)
+		delete(c.zoneTargetSpeeds, *zone)
+	}
 	c.mu.Unlock()
+
+	if zone == nil || c.zoneTargeted(*zone) {
+		return
+	}
+	if err := c.ipmi.ReleaseZone(ctx, *zone); err != nil {
+		log.Warn().Err(err).Int("zone", *zone).Msg("Failed to release zone to firmware control")
+	}
+}
+
+// zoneTargeted reports whether any active profile targets the zone. Errors
+// read as "targeted" so a DB hiccup never releases a fan a profile controls.
+func (c *FanController) zoneTargeted(zone int) bool {
+	var profiles []models.Profile
+	if err := database.DB.Where("is_active = ?", true).Find(&profiles).Error; err != nil {
+		return true
+	}
+	for _, p := range profiles {
+		for _, z := range p.Zones {
+			if z == zone {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // HasManualOverride reports whether a fan has an active (non-expired) override,
@@ -512,7 +596,15 @@ func (c *FanController) controlCycle(ctx context.Context) {
 
 	// Apply zone targets, honoring each controlling profile's min-run-time,
 	// transition time and smoothing settings (previously hardcoded 30s/10s).
+	// Zones the active driver doesn't expose (a profile saved on a previous
+	// board, say) are skipped with one warning per zone — retrying the write
+	// every cycle would only flood the event log.
+	present := c.presentZones()
 	for zone, targetSpeed := range zoneTargets {
+		if present != nil && !present[zone] {
+			c.warnStaleZone(zone, zoneControllingProfile[zone])
+			continue
+		}
 		prof := profileByID[zoneControllingProfile[zone]]
 		minRun := 30 * time.Second
 		transitionTime := 10 * time.Second

@@ -44,6 +44,17 @@ export function DegradedBanner() {
           'The fan controller is stopped. Fans are running at firmware defaults until you start it.',
       };
     }
+    // Driver-reported health issues, e.g. the board firmware/EC re-asserting
+    // its own duty over what we command (Gigabyte boards need the BIOS Smart
+    // Fan handed over, or the it87 fork's MMIO path).
+    const warnings = controller?.driver_warnings ?? [];
+    if (warnings.length > 0) {
+      return {
+        severity: 'warning',
+        icon: AlertTriangle,
+        message: `${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ''}`,
+      };
+    }
     if (!isConnected) {
       return {
         severity: 'info',

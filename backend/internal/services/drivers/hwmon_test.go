@@ -7,11 +7,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeChip writes a hwmon chip directory under root with the given name and a
-// set of pwm channels (each gets pwmN, pwmN_enable, fanN_input).
-func fakeChip(t *testing.T, root, dir, name string, channels map[int][2]int) string {
+// set of pwm channels (each gets pwmN, pwmN_enable=enable, fanN_input).
+func fakeChip(t *testing.T, root, dir, name, enable string, channels map[int][2]int) string {
 	t.Helper()
 	chipDir := filepath.Join(root, dir)
 	if err := os.MkdirAll(chipDir, 0o755); err != nil {
@@ -24,8 +25,8 @@ func fakeChip(t *testing.T, root, dir, name string, channels map[int][2]int) str
 	}
 	write("name", name)
 	for ch, rp := range channels {
-		write("pwm"+itoa(ch), itoa(rp[0]))       // raw pwm 0-255
-		write("pwm"+itoa(ch)+"_enable", "5")     // firmware auto at discovery
+		write("pwm"+itoa(ch), itoa(rp[0]))          // raw pwm 0-255
+		write("pwm"+itoa(ch)+"_enable", enable)     // firmware value at discovery
 		write("fan"+itoa(ch)+"_input", itoa(rp[1])) // rpm
 	}
 	return chipDir
@@ -42,106 +43,302 @@ func readFile(t *testing.T, p string) string {
 	return strings.TrimSpace(string(b))
 }
 
-func TestHwmonDiscover(t *testing.T) {
-	root := t.TempDir()
-	// Target chip: nct6799 with pwm1..3.
-	chip := fakeChip(t, root, "hwmon2", "nct6799", map[int][2]int{
-		1: {128, 900}, 2: {64, 500}, 3: {0, 0},
-	})
-	// Decoy: a temperature chip with no pwm — must be ignored.
-	fakeChip(t, root, "hwmon0", "acpitz", map[int][2]int{})
-	// Remove the decoy's pwm-less requirement: acpitz has no pwm1, so discover skips it.
-
-	d := &HwmonDriver{sysfsRoot: root, origEnable: map[int]string{}}
+func newTestDriver(t *testing.T, root string, allow ...string) *HwmonDriver {
+	t.Helper()
+	d := &HwmonDriver{sysfsRoot: root, allow: allow, origEnable: map[string]string{}}
 	if err := d.discover(); err != nil {
 		t.Fatalf("discover failed: %v", err)
 	}
-	if d.chipName != "nct6799" {
-		t.Errorf("chipName = %q, want nct6799", d.chipName)
-	}
-	if d.path != chip {
-		t.Errorf("path = %q, want %q", d.path, chip)
-	}
-	if len(d.channels) != 3 || d.channels[0] != 1 || d.channels[2] != 3 {
-		t.Errorf("channels = %v, want [1 2 3]", d.channels)
-	}
-	// origEnable captured from pwmN_enable at discovery.
-	if d.origEnable[1] != "5" {
-		t.Errorf("origEnable[1] = %q, want 5", d.origEnable[1])
-	}
+	return d
 }
 
-func TestHwmonZoneLayoutIDIsChannel(t *testing.T) {
+// Gigabyte-style two-chip board: the primary (it8689) lands on a HIGHER hwmon
+// number than the secondary so slot order must come from the name, not hwmonN.
+func gigabyteBoard(t *testing.T, root string) (primary, secondary string) {
+	t.Helper()
+	primary = fakeChip(t, root, "hwmon7", "it8689_9a0a0908", "2", map[int][2]int{
+		1: {66, 1600}, 2: {63, 0}, 3: {63, 0}, 4: {63, 0}, 5: {66, 0},
+	})
+	secondary = fakeChip(t, root, "hwmon5", "it87952_9a0a0908", "2", map[int][2]int{
+		1: {161, 1900}, 2: {161, 1970}, 3: {113, 0}, 4: {63, 1940}, 5: {63, 0},
+	})
+	fakeChip(t, root, "hwmon0", "k10temp", "", map[int][2]int{}) // sensor-only decoy
+	return primary, secondary
+}
+
+func TestHwmonDiscoverSingleChipKeepsLegacyIDs(t *testing.T) {
 	root := t.TempDir()
-	// pwm1 must exist (discovery's "controllable" marker); use channels 1 and 5
-	// so the zone ID for the second channel (5) differs from its slice index (1).
-	fakeChip(t, root, "hwmon0", "nct6799", map[int][2]int{1: {0, 0}, 5: {0, 0}})
-	d := &HwmonDriver{sysfsRoot: root, origEnable: map[int]string{}}
-	if err := d.discover(); err != nil {
-		t.Fatal(err)
+	chip := fakeChip(t, root, "hwmon2", "nct6799", "5", map[int][2]int{1: {128, 900}, 2: {64, 500}, 5: {0, 0}})
+	fakeChip(t, root, "hwmon0", "acpitz", "", map[int][2]int{}) // no pwm → ignored
+
+	d := newTestDriver(t, root)
+	if len(d.chips) != 1 || d.chips[0].name != "nct6799" || d.chips[0].key != "nct6799" || d.chips[0].dir != chip {
+		t.Fatalf("unexpected chips: %+v", d.chips)
 	}
+	if d.chips[0].family.id != "nct6775" {
+		t.Errorf("family = %q, want nct6775", d.chips[0].family.id)
+	}
+	// Zone ID == channel number for the first chip (unchanged behaviour).
 	layout := d.buildZoneLayout()
-	if len(layout.Zones) != 2 {
-		t.Fatalf("expected 2 zones, got %d", len(layout.Zones))
+	ids := map[int]bool{}
+	for _, z := range layout.Zones {
+		ids[z.ID] = true
 	}
-	// Zone ID must equal the hardware channel number, not the slice index.
-	ids := map[int]bool{layout.Zones[0].ID: true, layout.Zones[1].ID: true}
-	if !ids[1] || !ids[5] {
-		t.Errorf("zone IDs = %v, want {1,5}", ids)
+	if len(ids) != 3 || !ids[1] || !ids[2] || !ids[5] {
+		t.Errorf("zone IDs = %v, want {1,2,5}", ids)
+	}
+	if got := d.origEnable["nct6799/1"]; got != "5" {
+		t.Errorf("origEnable = %q, want 5", got)
+	}
+	if d.modelLocked() != "nct6799" {
+		t.Errorf("model = %q", d.modelLocked())
 	}
 }
 
-func TestHwmonDetectFansAndReadings(t *testing.T) {
+func TestHwmonMultiChipIdentity(t *testing.T) {
 	root := t.TempDir()
-	// pwm 255 → 100%, pwm 128 → ~50%.
-	fakeChip(t, root, "hwmon0", "nct6799", map[int][2]int{1: {255, 1200}, 2: {128, 600}})
-	d := &HwmonDriver{sysfsRoot: root, origEnable: map[int]string{}}
-	if err := d.discover(); err != nil {
-		t.Fatal(err)
+	gigabyteBoard(t, root)
+	d := newTestDriver(t, root)
+
+	if len(d.chips) != 2 {
+		t.Fatalf("expected 2 chips, got %d", len(d.chips))
+	}
+	if d.chips[0].key != "it8689" || d.chips[1].key != "it87952" {
+		t.Errorf("slot order/keys = %s,%s; want it8689,it87952 (name order, not hwmonN)", d.chips[0].key, d.chips[1].key)
+	}
+	if d.modelLocked() != "it8689+it87952" {
+		t.Errorf("model = %q", d.modelLocked())
 	}
 
 	fans, err := d.DetectFans(context.Background())
-	if err != nil || len(fans) != 2 {
-		t.Fatalf("DetectFans = %v (err %v), want 2 fans", fans, err)
+	if err != nil || len(fans) != 10 {
+		t.Fatalf("DetectFans = %d fans (err %v), want 10", len(fans), err)
 	}
-	if fans[0].SensorID != "fan1" || fans[0].Channel != 1 || fans[0].ZoneID != 1 {
-		t.Errorf("fan[0] identity wrong: %+v", fans[0])
+	if fans[0].SensorID != "it8689/fan1" || fans[0].Chip != "it8689" || fans[0].Channel != 1 || fans[0].ZoneID != 1 {
+		t.Errorf("primary fan1 identity: %+v", fans[0])
 	}
-	if fans[0].RPM != 1200 || fans[0].DutyCycle != 100 {
-		t.Errorf("fan[0] rpm/duty = %d/%d, want 1200/100", fans[0].RPM, fans[0].DutyCycle)
+	if fans[5].SensorID != "it87952/fan1" || fans[5].Chip != "it87952" || fans[5].Channel != 1 || fans[5].ZoneID != 101 {
+		t.Errorf("secondary fan1 identity: %+v", fans[5])
+	}
+	if fans[8].ZoneID != 104 || fans[8].RPM != 1940 {
+		t.Errorf("secondary fan4: %+v", fans[8])
 	}
 
-	readings, err := d.GetFanReadings(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	layout := d.buildZoneLayout()
+	if len(layout.Zones) != 10 || layout.Zones[5].Chip != "it87952" || layout.Zones[5].Name != "it87952 pwm1" {
+		t.Errorf("zone layout: %+v", layout.Zones)
 	}
-	if readings["fan2"].RPM != 600 || readings["fan2"].DutyCycle != 50 {
-		t.Errorf("fan2 reading = %+v, want rpm 600 duty 50", readings["fan2"])
+	caps := d.capsLocked()
+	if caps.MaxZones != 10 || !caps.PerZoneFirmwareFallback {
+		t.Errorf("caps = %+v", caps)
 	}
 }
 
-func TestHwmonSetFanSpeed(t *testing.T) {
+func TestHwmonAllowList(t *testing.T) {
 	root := t.TempDir()
-	chip := fakeChip(t, root, "hwmon0", "nct6799", map[int][2]int{1: {0, 0}, 2: {0, 0}})
-	d := &HwmonDriver{sysfsRoot: root, origEnable: map[int]string{}}
-	if err := d.discover(); err != nil {
+	gigabyteBoard(t, root)
+
+	d := newTestDriver(t, root, "it87952")
+	if len(d.chips) != 1 || d.chips[0].key != "it87952" {
+		t.Errorf("allow-list should bind only it87952, got %+v", d.chips)
+	}
+	// The only chip is slot 0, so its zones are 1..5.
+	if z := d.buildZoneLayout().Zones[0].ID; z != 1 {
+		t.Errorf("single allowed chip zone = %d, want 1", z)
+	}
+
+	d = &HwmonDriver{sysfsRoot: root, allow: []string{"nct6796"}, origEnable: map[string]string{}}
+	if err := d.discover(); err == nil {
+		t.Error("expected discover to fail when no chip matches the allow-list")
+	}
+}
+
+func TestHwmonLazyManualAndRelease(t *testing.T) {
+	root := t.TempDir()
+	primary, secondary := gigabyteBoard(t, root)
+	d := newTestDriver(t, root)
+	ctx := context.Background()
+
+	// Opening the session must not touch any channel.
+	if err := d.SetManualMode(ctx, true); err != nil {
 		t.Fatal(err)
 	}
-
-	if err := d.SetFanSpeed(context.Background(), 2, 50); err != nil {
-		t.Fatalf("SetFanSpeed: %v", err)
-	}
-	// 50% → pctToPWM = (50*255+50)/100 = 128; enable set to manual "1".
-	if got := readFile(t, filepath.Join(chip, "pwm2")); got != "128" {
-		t.Errorf("pwm2 = %q, want 128", got)
-	}
-	if got := readFile(t, filepath.Join(chip, "pwm2_enable")); got != "1" {
-		t.Errorf("pwm2_enable = %q, want 1 (manual)", got)
+	if got := readFile(t, filepath.Join(primary, "pwm1_enable")); got != "2" {
+		t.Errorf("SetManualMode(true) switched CPU fan to manual (enable=%s); should be lazy", got)
 	}
 
-	// A channel that isn't present must be rejected.
-	if err := d.SetFanSpeed(context.Background(), 7, 50); err == nil {
-		t.Error("expected error setting absent channel 7")
+	// Writing zone 102 (secondary pwm2) switches only that channel.
+	if err := d.SetFanSpeed(ctx, 102, 50); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(secondary, "pwm2")); got != "128" {
+		t.Errorf("pwm2 = %s, want 128", got)
+	}
+	if got := readFile(t, filepath.Join(secondary, "pwm2_enable")); got != "1" {
+		t.Errorf("pwm2_enable = %s, want 1", got)
+	}
+	if got := readFile(t, filepath.Join(secondary, "pwm1_enable")); got != "2" {
+		t.Errorf("untouched pwm1_enable = %s, want 2", got)
+	}
+	// Zone 2 is the primary's pwm2, not the secondary's.
+	if err := d.SetFanSpeed(ctx, 2, 60); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(primary, "pwm2")); got != "153" {
+		t.Errorf("primary pwm2 = %s, want 153", got)
+	}
+	// Absent zones are rejected.
+	if err := d.SetFanSpeed(ctx, 7, 50); err == nil {
+		t.Error("expected error for absent zone 7")
+	}
+	if err := d.SetFanSpeed(ctx, 201, 50); err == nil {
+		t.Error("expected error for zone on a non-existent third chip")
+	}
+
+	// Releasing one zone restores firmware auto on it alone.
+	if err := d.ReleaseZone(ctx, 102); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(secondary, "pwm2_enable")); got != "2" {
+		t.Errorf("released pwm2_enable = %s, want 2", got)
+	}
+	if got := readFile(t, filepath.Join(primary, "pwm2_enable")); got != "1" {
+		t.Errorf("primary pwm2 should still be manual, got %s", got)
+	}
+
+	// Closing the session releases everything touched.
+	if err := d.SetManualMode(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(primary, "pwm2_enable")); got != "2" {
+		t.Errorf("after close primary pwm2_enable = %s, want 2", got)
+	}
+	if d.IsManualMode() {
+		t.Error("session should be closed")
+	}
+}
+
+func TestHwmonReleaseFallsBackToFamilyAuto(t *testing.T) {
+	// EC-driven boards read pwmN_enable=1 at discovery (in-tree it87 on
+	// Gigabyte), so "restore what we saw" would leave the channel manual; the
+	// family's auto value must be used instead — 2 for it87, 5 for nct6775.
+	root := t.TempDir()
+	ite := fakeChip(t, root, "hwmon1", "it87952", "1", map[int][2]int{1: {100, 1000}})
+	nct := fakeChip(t, root, "hwmon2", "nct6799", "1", map[int][2]int{1: {100, 1000}})
+	d := newTestDriver(t, root)
+	ctx := context.Background()
+
+	if err := d.SetAllFanSpeeds(ctx, 40); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetManualMode(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(ite, "pwm1_enable")); got != "2" {
+		t.Errorf("it87 release enable = %s, want 2", got)
+	}
+	if got := readFile(t, filepath.Join(nct, "pwm1_enable")); got != "5" {
+		t.Errorf("nct6775 release enable = %s, want 5", got)
+	}
+}
+
+func TestHwmonIdentifyZoneRestoresPriorState(t *testing.T) {
+	root := t.TempDir()
+	primary, secondary := gigabyteBoard(t, root)
+	d := newTestDriver(t, root)
+	ctx := context.Background()
+
+	// Owned channel: goes back to the commanded duty.
+	if err := d.SetFanSpeed(ctx, 101, 40); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.IdentifyZone(ctx, 101, 5*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(secondary, "pwm1")); got != "102" {
+		t.Errorf("owned channel pwm1 after identify = %s, want 102 (40%%)", got)
+	}
+	// Firmware-managed channel: goes back to firmware auto.
+	if err := d.IdentifyZone(ctx, 1, 5*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(primary, "pwm1_enable")); got != "2" {
+		t.Errorf("unowned CPU fan enable after identify = %s, want 2", got)
+	}
+}
+
+func TestHwmonReadbackOverrideDetection(t *testing.T) {
+	root := t.TempDir()
+	_, secondary := gigabyteBoard(t, root)
+	d := newTestDriver(t, root)
+	ctx := context.Background()
+
+	if err := d.SetFanSpeed(ctx, 101, 80); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the EC rewriting the register, well after our write.
+	if err := os.WriteFile(filepath.Join(secondary, "pwm1"), []byte("120\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.chips[1].writtenAt[1] = time.Now().Add(-time.Minute)
+
+	for i := 0; i < overrideAfter-1; i++ {
+		if _, err := d.GetFanReadings(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if w := d.DriverWarnings(); len(w) != 0 {
+			t.Fatalf("warned after %d mismatches: %v", i+1, w)
+		}
+	}
+	if _, err := d.GetFanReadings(ctx); err != nil {
+		t.Fatal(err)
+	}
+	w := d.DriverWarnings()
+	if len(w) != 1 || !strings.Contains(w[0], "it87952 pwm1") {
+		t.Errorf("expected one override warning for it87952 pwm1, got %v", w)
+	}
+	// A matching readback clears it.
+	if err := os.WriteFile(filepath.Join(secondary, "pwm1"), []byte("204\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.GetFanReadings(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if w := d.DriverWarnings(); len(w) != 0 {
+		t.Errorf("warning should clear once readback matches, got %v", w)
+	}
+}
+
+func TestHwmonReadingsModeAndUnreadableDuty(t *testing.T) {
+	root := t.TempDir()
+	_, secondary := gigabyteBoard(t, root)
+	// it87 returns ENODATA for H2RAM channels in firmware mode: emulate an
+	// unreadable pwm4 (a directory can't be read as a file, but still stats).
+	if err := os.Remove(filepath.Join(secondary, "pwm4")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(secondary, "pwm4"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDriver(t, root)
+	ctx := context.Background()
+
+	r, err := d.GetFanReadings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r["it87952/fan4"]; got.DutyCycle != -1 || got.RPM != 1940 || got.ControlMode != "firmware" {
+		t.Errorf("fan4 reading = %+v, want duty -1 / rpm 1940 / firmware", got)
+	}
+	if got := r["it87952/fan1"]; got.DutyCycle != 63 || got.ControlMode != "firmware" {
+		t.Errorf("fan1 reading = %+v, want duty 63 / firmware", got)
+	}
+	if err := d.SetFanSpeed(ctx, 101, 100); err != nil {
+		t.Fatal(err)
+	}
+	r, _ = d.GetFanReadings(ctx)
+	if got := r["it87952/fan1"]; got.DutyCycle != 100 || got.ControlMode != "manual" {
+		t.Errorf("after set, fan1 reading = %+v, want duty 100 / manual", got)
 	}
 }
 
@@ -156,17 +353,10 @@ func TestPWMConversions(t *testing.T) {
 			t.Errorf("pwmToPct(%d) = %d, want %d", tt.pwm, got, tt.pct)
 		}
 	}
-	// Clamping.
 	if pctToPWM(150) != 255 || pctToPWM(-5) != 0 {
 		t.Error("pctToPWM clamp failed")
 	}
-}
-
-func TestHwmonPreferNameMismatch(t *testing.T) {
-	root := t.TempDir()
-	fakeChip(t, root, "hwmon0", "nct6799", map[int][2]int{1: {0, 0}})
-	d := &HwmonDriver{sysfsRoot: root, preferName: "nct6796", origEnable: map[int]string{}}
-	if err := d.discover(); err == nil {
-		t.Error("expected discover to fail when preferName does not match any chip")
+	if shortName("it8689_9a0a0908") != "it8689" || shortName("nct6799") != "nct6799" {
+		t.Error("shortName")
 	}
 }

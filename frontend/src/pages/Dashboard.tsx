@@ -300,8 +300,8 @@ export function Dashboard() {
                 return (
                   <div key={fan.id} className={`flex flex-col items-center p-3 rounded-lg ${cardCls}`}>
                     <RadialGauge
-                      value={fan.current_duty ?? 0}
-                      tone={state === 'failed' ? 'danger' : dutyTone(fan.current_duty ?? 0)}
+                      value={Math.max(0, fan.current_duty ?? 0)}
+                      tone={state === 'failed' ? 'danger' : dutyTone(Math.max(0, fan.current_duty ?? 0))}
                       size={104}
                     />
                     <span
@@ -319,6 +319,7 @@ export function Dashboard() {
                         className={`text-xs tabular-nums ${state === 'idle' ? 'text-muted-2' : 'text-muted'}`}
                       >
                         {fan.current_rpm} RPM{state === 'idle' ? ' · idle' : ''}
+                        {fan.control_mode === 'firmware' ? ' · firmware' : ''}
                       </span>
                     )}
                     <span className="mt-1 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-2">
@@ -330,7 +331,7 @@ export function Dashboard() {
                       ) : (
                         <>
                           <Layers className="w-3 h-3" />
-                          Zone {fan.ipmi_zone}
+                          {fan.chip && fan.channel != null ? `${fan.chip} pwm${fan.channel}` : `Zone ${fan.ipmi_zone}`}
                         </>
                       )}
                     </span>

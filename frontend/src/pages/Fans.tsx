@@ -125,7 +125,7 @@ export function Fans() {
   const handleSetSpeed = (fan: FanStatus) => {
     setSpeedFan(fan);
     // Seed from the fan's current duty so "nudge" is intuitive (was hardcoded 50).
-    setSpeedValue(fan.current_duty ?? 50);
+    setSpeedValue(fan.current_duty != null && fan.current_duty >= 0 ? fan.current_duty : 50);
   };
 
   const handleSaveLabel = () => {
@@ -334,7 +334,11 @@ function FanCard({ fan, zones, state, onEditLabel, onIdentify, onSetSpeed, onAss
               <h3 className="font-semibold text-fg-2">{fan.label || fan.ipmi_sensor_id}</h3>
               <p className="text-sm text-muted">
                 {fan.ipmi_sensor_id}
-                {fan.channel != null && <span className="ml-1 text-muted-2">· pwm{fan.channel}</span>}
+                {fan.channel != null && (
+                  <span className="ml-1 text-muted-2">
+                    · {fan.chip ? `${fan.chip} ` : ''}pwm{fan.channel}
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -347,6 +351,14 @@ function FanCard({ fan, zones, state, onEditLabel, onIdentify, onSetSpeed, onAss
             {fan.manual_override && (
               <span className="text-xs bg-warn/15 text-warn px-2 py-1 rounded">Manual</span>
             )}
+            {fan.control_mode === 'firmware' && !fan.manual_override && (
+              <span
+                className="text-xs bg-surface-2 text-muted px-2 py-1 rounded"
+                title="The board's own fan curve is driving this fan; it is not targeted by a profile or override."
+              >
+                Firmware
+              </span>
+            )}
           </div>
         </div>
 
@@ -358,8 +370,10 @@ function FanCard({ fan, zones, state, onEditLabel, onIdentify, onSetSpeed, onAss
             </p>
           </div>
           <div className="p-3 bg-surface-2/50 rounded-lg">
-            <p className="text-2xl font-bold text-fg">{fan.current_duty ?? '-'}</p>
-            <p className="text-xs text-muted">Duty %</p>
+            <p className="text-2xl font-bold text-fg">
+              {fan.current_duty != null && fan.current_duty >= 0 ? fan.current_duty : '—'}
+            </p>
+            <p className="text-xs text-muted">Duty %{fan.control_mode === 'firmware' ? ' (firmware)' : ''}</p>
           </div>
         </div>
 

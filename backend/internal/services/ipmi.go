@@ -420,8 +420,9 @@ func (s *IPMIService) GetFanDutyCycles(ctx context.Context) (map[int]int, error)
 
 // FanReading contains both RPM and duty cycle for a fan
 type FanReading struct {
-	RPM       int
-	DutyCycle int // 0-100%
+	RPM         int
+	DutyCycle   int    // 0-100%; -1 when the driver cannot read it
+	ControlMode string // models.FanControlManual / FanControlFirmware; "" if unknown
 }
 
 // GetFanReadings returns comprehensive fan data including both RPM and duty cycle
@@ -863,8 +864,31 @@ func (s *IPMIService) IsManualMode() bool {
 	return s.manualMode
 }
 
+// ReleaseZone hands one zone back to firmware automatic control on drivers
+// that support it (hwmon). Elsewhere "automatic" only exists for all zones at
+// once (SetManualMode(false)), so this is a no-op.
+func (s *IPMIService) ReleaseZone(ctx context.Context, zone int) error {
+	s.mu.RLock()
+	driver := s.driver
+	s.mu.RUnlock()
+	if zr, ok := driver.(ZoneReleaser); ok {
+		return zr.ReleaseZone(ctx, zone)
+	}
+	return nil
+}
+
 // IdentifyFan spins a specific fan zone to 100% for identification
 func (s *IPMIService) IdentifyFan(ctx context.Context, zone int, duration time.Duration) error {
+	// Drivers that can restore a zone's exact prior state do it themselves
+	// (the generic path below leaves a controlled zone at 100% until the next
+	// speed change, and can't restore a single firmware-managed zone).
+	s.mu.RLock()
+	driver := s.driver
+	s.mu.RUnlock()
+	if zi, ok := driver.(ZoneIdentifier); ok {
+		return zi.IdentifyZone(ctx, zone, duration)
+	}
+
 	// Save current manual mode state
 	wasManual := s.IsManualMode()
 

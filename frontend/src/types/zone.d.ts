@@ -6,6 +6,8 @@ export interface ZoneDefinition {
   fan_indices: number[];
   description?: string;
   is_default: boolean;
+  /** Controller chip the zone's channel lives on (multi-chip hwmon boards). */
+  chip?: string;
   color?: string;
 }
 

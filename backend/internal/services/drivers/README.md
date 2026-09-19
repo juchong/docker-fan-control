@@ -61,27 +61,46 @@ type IPMIDriver interface {
 ### 0. Hwmon Driver (`hwmon.go`) — primary, no BMC required
 
 **Vendor**: `Hwmon`
-**Model**: the resolved chip name (e.g. `nct6799`)
+**Model**: the bound chip keys joined with `+` (e.g. `nct6799`, `it8689+it87952`)
 **Backend**: Linux hwmon sysfs — no IPMI, no BMC. This is the driver for
-consumer/enthusiast boards.
+consumer/enthusiast/workstation boards.
 
 **Features**:
-- Direct PWM duty control by writing `/sys/class/hwmon/<chip>/pwmN`
-- Real duty-cycle reading (implements `FanReadingProvider`)
-- One zone per PWM channel; zone ID **is** the channel number
-- Manual mode by setting `pwmN_enable=1`; the original `pwmN_enable` value is
-  captured at discovery and restored to return control to firmware
+- Direct PWM duty control by writing `/sys/class/hwmon/<chip>/pwmN`, on **every**
+  controllable chip (Gigabyte boards typically have two ITE chips)
+- Real duty-cycle reading (implements `FanReadingProvider`), with
+  `ControlMode` (`manual`/`firmware`) per channel and duty `-1` when the chip
+  cannot report it
+- One zone per PWM channel; zone ID = `chipSlot*100 + channel` (slot = position
+  in name-sorted chip order, so a single chip keeps IDs `1..N`); sensor ID =
+  `<chip>/fanN` where chip is the hwmon name up to its first `_`
+- Chip families: `nct6*` (nct6775: manual `1`, auto `5`) and `it8*` (it87:
+  manual `1`, auto `2`; `0` = full speed). `HWMON_CHIP` is an allow-list of
+  name prefixes; empty binds every known family
+- **Lazy manual mode**: `SetManualMode(true)` only opens the session; a channel is
+  switched to manual on its first write, so untargeted channels stay on the
+  firmware curve. `SetManualMode(false)` / `ReleaseZone` restore the enable value
+  captured at discovery (falling back to the family's auto value when that was
+  itself manual, as on EC-driven Gigabyte boards). `PerZoneFirmwareFallback` in
+  the capabilities tells the controller to skip the all-fans startup floor
+- `IdentifyZone` (`ZoneIdentifier`) restores the channel's exact prior state
+- **Readback verification**: on channels it commanded, a `pwmN` readback that
+  disagrees for `overrideAfter` polls (after a grace period) is reported through
+  `DriverWarnings()` (`HealthReporter`) → `controller.driver_warnings` → UI banner
 
 **How it works**:
-- Discovery globs `/sys/class/hwmon/*/name`, picks the `nct6xxx` chip (or the one
-  pinned by `HWMON_CHIP`) that exposes `pwm1`, and enumerates `pwm1..pwm8`.
-- `SetFanSpeed(channel, percent)` writes `pwmN_enable=1` then `pwmN=<0-255>`.
+- Discovery globs `/sys/class/hwmon/*/name`, keeps every chip of a known family
+  (or matching `HWMON_CHIP`) that exposes some `pwmN`, sorts by name (hwmon
+  numbers aren't stable across boots), and enumerates `pwm1..pwm8` per chip.
+- `SetFanSpeed(zone, percent)` writes `pwmN_enable=1` (only if not already) then
+  `pwmN=<0-255>`.
 - Duty ↔ percent: `pwm = round(percent * 255 / 100)`.
 
-**Host requirements**: the Super-I/O module (`nct6775`) loaded on the host, a
-**read-write** `/sys` bind mount, and `apparmor=unconfined` on the container (the
-default AppArmor profile blocks `/sys` writes even as root). See the project
-README for setup.
+**Host requirements**: the Super-I/O module loaded on the host (`nct6775`, or
+`it87` — newer Gigabyte ITE chips need the frankcrawford/it87 fork via DKMS;
+the in-tree driver's writes are silently reverted by the EC), a **read-write**
+`/sys` bind mount, and `apparmor=unconfined` on the container (the default
+AppArmor profile blocks `/sys` writes even as root). See the project README.
 
 **Testability**: the driver reads its class dir from an injectable `sysfsRoot`
 field (defaults to `/sys/class/hwmon`), so tests point it at a fake `/sys`.

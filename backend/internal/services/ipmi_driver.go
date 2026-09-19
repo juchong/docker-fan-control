@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"time"
+
 	"docker-fan-control/internal/models"
 )
 
@@ -36,14 +38,39 @@ type FanReadingProvider interface {
 	GetFanReadings(ctx context.Context) (map[string]FanReading, error)
 }
 
+// ZoneIdentifier is an optional capability: spin one zone to 100% for the
+// duration and then restore its exact prior state (commanded duty, or firmware
+// automatic control if the driver wasn't managing it).
+type ZoneIdentifier interface {
+	IdentifyZone(ctx context.Context, zone int, duration time.Duration) error
+}
+
+// ZoneReleaser is an optional capability: hand one zone back to firmware
+// automatic control without touching the others.
+type ZoneReleaser interface {
+	ReleaseZone(ctx context.Context, zone int) error
+}
+
+// HealthReporter is an optional capability: live, human-readable warnings
+// about the driver's ability to control fans (e.g. firmware overriding PWM
+// writes), surfaced in the monitoring payload so the UI can warn.
+type HealthReporter interface {
+	DriverWarnings() []string
+}
+
 // DriverCapabilities describes what features a driver supports
 type DriverCapabilities struct {
 	SupportsManualMode       bool
 	SupportsDutyCycleReading bool
 	SupportsPerZoneControl   bool
-	MaxZones                 int
-	MaxFans                  int
-	HasStaticRPMValues       bool // Some BMCs report placeholder RPM values
+	// PerZoneFirmwareFallback: zones this driver has never been asked to
+	// control stay under firmware automatic control (hwmon). The controller
+	// then skips the all-fans startup floor, since an untargeted fan is never
+	// left unmanaged.
+	PerZoneFirmwareFallback bool
+	MaxZones                int
+	MaxFans                 int
+	HasStaticRPMValues      bool // Some BMCs report placeholder RPM values
 }
 
 // ZoneLayout defines the fan zone configuration for a motherboard

@@ -55,9 +55,13 @@ func (h *MonitoringHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 			SupportsManualMode:       caps.SupportsManualMode,
 			SupportsDutyCycleReading: caps.SupportsDutyCycleReading,
 			SupportsPerZoneControl:   caps.SupportsPerZoneControl,
+			FirmwareFallback:         caps.PerZoneFirmwareFallback,
 			MaxZones:                 caps.MaxZones,
 			MaxFans:                  caps.MaxFans,
 			HasStaticRPMValues:       caps.HasStaticRPMValues,
+		}
+		if hr, ok := currentDriver.(services.HealthReporter); ok {
+			monitoring.Controller.DriverWarnings = hr.DriverWarnings()
 		}
 	}
 
@@ -82,12 +86,14 @@ func (h *MonitoringHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 			Label:          fan.DisplayName(),
 			IPMIZone:       fan.IPMIZone,
 			Channel:        fan.Channel,
+			Chip:           fan.Chip,
 			ManualOverride: h.controller.HasManualOverride(fan.ID),
 		}
 
 		if rd, ok := readings[fan.IPMISensorID]; ok {
 			status.CurrentRPM = rd.RPM
 			status.CurrentDuty = rd.DutyCycle
+			status.ControlMode = rd.ControlMode
 		}
 		if fan.IPMIZone != nil {
 			if t, ok := h.controller.GetZoneTarget(*fan.IPMIZone); ok {
@@ -141,12 +147,14 @@ func (h *MonitoringHandler) GetFanStatus(w http.ResponseWriter, r *http.Request)
 			Label:          fan.DisplayName(),
 			IPMIZone:       fan.IPMIZone,
 			Channel:        fan.Channel,
+			Chip:           fan.Chip,
 			ManualOverride: h.controller.HasManualOverride(fan.ID),
 		}
 
 		if rd, ok := readings[fan.IPMISensorID]; ok {
 			status.CurrentRPM = rd.RPM
 			status.CurrentDuty = rd.DutyCycle
+			status.ControlMode = rd.ControlMode
 		}
 		if fan.IPMIZone != nil {
 			if t, ok := h.controller.GetZoneTarget(*fan.IPMIZone); ok {

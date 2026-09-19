@@ -76,6 +76,7 @@ type ZoneDefinition struct {
 	Description string   `json:"description,omitempty"`
 	IsDefault   bool     `json:"is_default"`
 	Color       string   `json:"color,omitempty"` // Optional color for UI
+	Chip        string   `json:"chip,omitempty"`  // controller chip (multi-chip hwmon boards)
 }
 
 // IPMI command format values
@@ -206,6 +207,7 @@ type ControllerState struct {
 	DriverVendor       string            `json:"driver_vendor,omitempty"`
 	DriverModel        string            `json:"driver_model,omitempty"`
 	DriverCapabilities DriverCapabilities `json:"driver_capabilities,omitempty"`
+	DriverWarnings     []string          `json:"driver_warnings,omitempty"` // live driver health issues (e.g. firmware overriding writes)
 }
 
 // DriverCapabilities represents driver capabilities
@@ -213,6 +215,7 @@ type DriverCapabilities struct {
 	SupportsManualMode       bool `json:"supports_manual_mode"`
 	SupportsDutyCycleReading bool `json:"supports_duty_cycle_reading"`
 	SupportsPerZoneControl   bool `json:"supports_per_zone_control"`
+	FirmwareFallback         bool `json:"firmware_fallback"` // untargeted zones stay on the firmware curve
 	MaxZones                 int  `json:"max_zones"`
 	MaxFans                  int  `json:"max_fans"`
 	HasStaticRPMValues       bool `json:"has_static_rpm_values"`

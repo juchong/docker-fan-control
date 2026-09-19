@@ -105,9 +105,16 @@ Fans are controlled by writing to `/sys/class/hwmon/*/pwmN`, so the container
 needs a **read-write `/sys`**, and the host must have the Super-I/O driver
 loaded.
 
-1. Load the sensor driver on the **host** and make it persistent:
+1. Load the sensor driver on the **host** and make it persistent. Which one
+   depends on the Super-I/O chip:
+
+   | Chip family | Typical boards | Module |
+   |---|---|---|
+   | Nuvoton `NCT67xx` (hwmon `nct6xxx`) | ASUS, MSI, many others | in-tree `nct6775` |
+   | ITE `IT86xx`/`IT87xx`/`IT87952E` (hwmon `it8xxx`) | Gigabyte (often **two** chips) | in-tree `it87` for older chips; newer Gigabyte chips need the [frankcrawford/it87](https://github.com/frankcrawford/it87) fork via DKMS (`sudo ./dkms-install.sh`) — the in-tree driver either doesn't know the chip or its PWM writes are silently overridden by the EC |
+
    ```bash
-   sudo modprobe nct6775
+   sudo modprobe nct6775            # or: sudo modprobe it87
    echo nct6775 | sudo tee /etc/modules-load.d/nct6775.conf
    # confirm it bound and exposes pwm files:
    ls /sys/class/hwmon/*/pwm1 2>/dev/null && sensors
@@ -119,14 +126,29 @@ loaded.
    security_opt:
      - apparmor=unconfined       # the default AppArmor profile blocks /sys writes
    environment:
-     - HWMON_CHIP=nct6799        # optional: pin the chip; empty = first nct6xxx
+     - HWMON_CHIP=               # optional allow-list of chip-name prefixes; empty = all
    ```
 
 `apparmor=unconfined` is much narrower than `privileged: true`; it only lifts the
 MAC layer that denies `/sys` writes.
 
-> **Secure Boot:** on some hosts `nct6775` must be allow-listed or the ACPI
-> resource conflict overridden (`acpi_enforce_resources=lax`) before it binds.
+Every controllable chip is bound — a board with two Super-I/O chips gets all of
+its headers. Channels that no profile or manual override targets **stay on the
+firmware's own fan curve**; the driver only switches a channel to manual when
+it first writes it, and hands it back on stop. So a CPU fan on a controllable
+header keeps its BIOS curve unless you deliberately point a profile at it.
+
+> **Gigabyte boards:** in firmware mode the ITE chips' duty readback is not the
+> effective duty (the EC drives the fan through its own path), so such fans show
+> as *firmware* with no duty figure. If the UI warns that *firmware is
+> overriding fan writes*, the BIOS Smart Fan setting for that header must be
+> handed over (set it to Manual/Full Speed), or the driver needs the fork's
+> MMIO path.
+>
+> **Secure Boot:** an out-of-tree module must be signed (DKMS can sign with your
+> MOK); on some hosts an ACPI resource conflict must be overridden
+> (`ignore_resource_conflict=1` for `it87`, `acpi_enforce_resources=lax` for
+> `nct6775`) before the driver binds.
 
 #### IPMI servers
 
@@ -167,7 +189,7 @@ All configuration is environment variables. See [`env.example`](env.example).
 | `AUTH_PROXY_ENABLED` | `false` | Trust an authenticating reverse proxy. |
 | `AUTH_PROXY_HEADER` | `X-Forwarded-User` | Header carrying the proxied username. |
 | `AUTH_PROXY_AUTO_CREATE` | `true` | Create users seen via the proxy header. |
-| `HWMON_CHIP` | *(empty)* | hwmon backend: pin the chip name (e.g. `nct6799`); empty auto-selects the first `nct6xxx` with PWM. |
+| `HWMON_CHIP` | *(empty)* | hwmon backend: comma-separated allow-list of chip-name prefixes to bind (e.g. `it87952`); empty binds every `nct6xxx`/`it8xxx` chip with PWM channels. |
 | `IPMI_MODE` | `local` | IPMI backend: `local` (`/dev/ipmi0`) or `lan`. |
 | `IPMI_HOST` / `IPMI_USER` / `IPMI_PASS` | *(none)* | IPMI LAN credentials. |
 | `CONTROL_INTERVAL` | `5s` | Control-loop period. |
@@ -185,8 +207,8 @@ All configuration is environment variables. See [`env.example`](env.example).
 2. **Identify & label** — *Identify* briefly spins a fan so you can tell which is
    which, then give it a friendly label.
 3. **Assign zones** — each fan card has a control-zone selector. On hwmon each
-   fan is already its own zone; group fans by pointing a profile at several
-   zones.
+   fan is already its own zone (named after its chip and channel, e.g.
+   `it87952 pwm1`); group fans by pointing a profile at several zones.
 4. **Create a profile** — pick an algorithm, choose input sensors (GPU/CPU/drive/
    board temps and GPU/CPU load), set the curve, pick target zones, and tune the
    advanced options (smoothing, min-run, hysteresis, priority). Every field has
@@ -215,7 +237,7 @@ they blend on a common scale.
 
 | Backend | Manual control | Per-zone | Notes |
 |---|:---:|:---:|---|
-| **hwmon** (Nuvoton `nct6775`/`nct679x` via sysfs) | ✅ | ✅ | One zone per PWM channel. The path for BMC-less boards. |
+| **hwmon** (Nuvoton `nct6775`, ITE `it87` via sysfs; multi-chip) | ✅ | ✅ | One zone per PWM channel on every bound chip; untargeted channels stay on the firmware curve. The path for BMC-less boards. |
 | ASRock Rack (IPMI) | ✅ | ✅ | ROMED8-2T tested; some BMCs report static RPM (duty % is the accurate figure). |
 | Dell PowerEdge (IPMI) | ✅ | ✅ | iDRAC-based. |
 | Supermicro (IPMI) | ✅ | ✅ | X9/X10/X11. |
