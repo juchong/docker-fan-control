@@ -291,6 +291,11 @@ export function Dashboard() {
               .sort((a, b) => (a.ipmi_zone ?? Infinity) - (b.ipmi_zone ?? Infinity))
               .map((fan) => {
                 const state = fanHealth(fan);
+                // An idle output (nothing spinning, not a failure) reads 0%:
+                // the chip still reports a duty for the empty header, which
+                // means nothing. A FAILED fan keeps its commanded duty so the
+                // "commanded X% but no RPM" mismatch stays visible.
+                const shownDuty = state === 'idle' ? 0 : Math.max(0, fan.current_duty ?? 0);
                 const cardCls =
                   state === 'failed'
                     ? 'border border-danger bg-danger/10'
@@ -300,8 +305,8 @@ export function Dashboard() {
                 return (
                   <div key={fan.id} className={`flex flex-col items-center p-3 rounded-lg ${cardCls}`}>
                     <RadialGauge
-                      value={Math.max(0, fan.current_duty ?? 0)}
-                      tone={state === 'failed' ? 'danger' : dutyTone(Math.max(0, fan.current_duty ?? 0))}
+                      value={shownDuty}
+                      tone={state === 'failed' ? 'danger' : dutyTone(shownDuty)}
                       size={104}
                     />
                     <span
