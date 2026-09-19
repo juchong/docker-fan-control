@@ -1,10 +1,14 @@
 import { useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { HelpCircle } from 'lucide-react';
 
 // A small "(?)" help affordance with an accessible tooltip. The tooltip is
 // rendered with position: fixed (computed from the trigger's rect) so it is
 // never clipped by a scrolling modal body, and flips above the trigger when
-// near the bottom of the viewport.
+// near the bottom of the viewport. It is portaled to <body>: inside its
+// trigger's subtree an ancestor with opacity/transform (e.g. a dimmed idle
+// fan card) would form a stacking context that traps it under later siblings
+// and inherits the dimming.
 export function HelpTip({ text, label }: { text: string; label?: string }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -45,15 +49,17 @@ export function HelpTip({ text, label }: { text: string; label?: string }) {
       >
         <HelpCircle className="w-3.5 h-3.5" />
       </button>
-      {open && (
-        <span
-          role="tooltip"
-          style={{ ...style, maxWidth: 280 }}
-          className="z-[70] block p-2 text-xs leading-snug rounded-lg bg-surface border border-line shadow-lg text-fg-2 pointer-events-none"
-        >
-          {text}
-        </span>
-      )}
+      {open &&
+        createPortal(
+          <span
+            role="tooltip"
+            style={{ ...style, maxWidth: 280 }}
+            className="z-[1000] block p-2 text-xs leading-snug rounded-lg bg-surface border border-line shadow-lg text-fg-2 pointer-events-none"
+          >
+            {text}
+          </span>,
+          document.body
+        )}
     </span>
   );
 }
