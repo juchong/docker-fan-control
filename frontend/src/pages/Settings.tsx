@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { settingsApi, authApi } from '../services/api';
 import { useAuthContext } from '../components/auth/AuthProvider';
@@ -7,6 +7,7 @@ import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { AppSettings, UpdateSettingsRequest } from '../types/settings';
+import type { ThermalInfo, ThermalStatus } from '../types/monitoring';
 import { User } from '../types/auth';
 import {
   Save,
@@ -59,11 +60,22 @@ export function Settings() {
     warning_temp: 70,
     warning_enabled: true,
     safety_on_shutdown: true,
+    thermal_limits_mode: 'hardware',
+    warning_margin: 15,
+    emergency_margin: 5,
   });
 
   useEffect(() => {
     if (settings) {
+      // Every field the form can send must be loaded here, or saving (which
+      // sends the whole form) would reset a stored value to the default.
       setFormData({
+        thermal_limits_mode: settings.thermal_limits_mode ?? 'hardware',
+        warning_margin: settings.warning_margin ?? 15,
+        emergency_margin: settings.emergency_margin ?? 5,
+        limit_gpu: settings.limit_gpu ?? 0,
+        limit_cpu: settings.limit_cpu ?? 0,
+        limit_drive: settings.limit_drive ?? 0,
         ipmi_mode: settings.ipmi_mode,
         ipmi_host: settings.ipmi_host,
         ipmi_user: settings.ipmi_user,
@@ -160,11 +172,46 @@ export function Settings() {
     setFormData({ ...formData, [field]: value });
   };
 
+  // Thermal limits: hardware mode judges each device by headroom to its own
+  // limit; legacy mode is the single warning/emergency temperature pair.
+  const hardwareMode = (formData.thermal_limits_mode ?? 'hardware') === 'hardware';
+  const warningMargin = formData.warning_margin ?? 15;
+  const emergencyMargin = formData.emergency_margin ?? 5;
+  const marginError = !hardwareMode
+    ? null
+    : warningMargin < 1 || warningMargin > 40
+      ? 'Warning margin must be between 1 and 40 °C.'
+      : emergencyMargin < 0 || emergencyMargin > 20
+        ? 'Emergency margin must be between 0 and 20 °C.'
+        : emergencyMargin >= warningMargin
+          ? 'The emergency margin must be smaller than the warning margin.'
+          : null;
+
+  // Live "effective limits" rows from the monitoring feed: what each device's
+  // limit is, where it came from, and where the current form values would put
+  // its warning / emergency points. "—" when the backend hasn't annotated it.
+  const limitRows = useMemo(() => {
+    type Row = { kind: string; name: string; temp: number; info: ThermalInfo };
+    const rows: Row[] = [];
+    (monitoring?.gpus ?? []).forEach((g) => rows.push({ kind: `GPU ${g.index}`, name: g.name, temp: g.temperature, info: g }));
+    (monitoring?.system?.cpu_packages ?? []).forEach((c) =>
+      rows.push({ kind: `CPU ${c.index}`, name: c.model || c.name, temp: c.temperature, info: c })
+    );
+    (monitoring?.system?.drives ?? []).forEach((d) => rows.push({ kind: `Drive ${d.index}`, name: d.model, temp: d.temperature, info: d }));
+    return rows;
+  }, [monitoring]);
+
+  const statusText: Record<ThermalStatus, string> = { ok: 'text-ok', warning: 'text-warn', critical: 'text-danger' };
+  const overrideFor = (kind: string): number | undefined => {
+    const v = kind.startsWith('GPU') ? formData.limit_gpu : kind.startsWith('CPU') ? formData.limit_cpu : formData.limit_drive;
+    return v && v > 0 ? v : undefined;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-fg">Settings</h1>
-        <Button onClick={handleSave} isLoading={updateMutation.isPending}>
+        <Button onClick={handleSave} isLoading={updateMutation.isPending} disabled={!!marginError} title={marginError ?? undefined}>
           <Save className="w-4 h-4 mr-2" />
           Save Changes
         </Button>
@@ -482,6 +529,62 @@ export function Settings() {
         {/* Safety Thresholds */}
         <Card title="Safety Thresholds">
           <div className="space-y-4">
+            {/* Per-device limits (headroom-based). The legacy fields below stay
+                exactly as they were; in hardware mode they only cover devices
+                with no known limit. */}
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={hardwareMode}
+                onChange={(e) => handleChange('thermal_limits_mode', e.target.checked ? 'hardware' : 'legacy')}
+              />
+              <span>
+                <span className="text-fg-3">Use each device's own limit (hardware-derived)</span>
+                <span className="block text-xs text-muted">
+                  GPUs report their throttle point (NVML), NVMe drives their critical temperature (hwmon), Intel CPUs
+                  their TjMax; anything else gets a conservative class default. Warnings and the emergency are then
+                  judged by how close each device is to <em>its</em> limit.
+                </span>
+              </span>
+            </label>
+            {hardwareMode && (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="input-label">Warn when headroom ≤ (°C)</label>
+                  <input
+                    type="number"
+                    className="input"
+                    min={1}
+                    max={40}
+                    value={warningMargin}
+                    onChange={(e) => handleChange('warning_margin', parseInt(e.target.value))}
+                  />
+                </div>
+                <div>
+                  <label className="input-label">Emergency when headroom ≤ (°C)</label>
+                  <input
+                    type="number"
+                    className="input"
+                    min={0}
+                    max={20}
+                    value={emergencyMargin}
+                    onChange={(e) => handleChange('emergency_margin', parseInt(e.target.value))}
+                  />
+                </div>
+              </div>
+            )}
+            {marginError && (
+              <p className="text-sm text-danger" role="alert">
+                {marginError}
+              </p>
+            )}
+            {hardwareMode && (
+              <p className="text-xs text-muted">
+                The emergency temperature, speed and warning temperature below apply to devices whose limit is unknown.
+              </p>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="input-label">Emergency Temp (°C)</label>
@@ -522,6 +625,82 @@ export function Settings() {
                 onChange={(e) => handleChange('warning_temp', parseInt(e.target.value))}
                 disabled={!formData.warning_enabled}
               />
+            </div>
+
+            {/* Effective limits: read-only, from the live monitoring feed, with
+                the warning/emergency points the current form values imply. */}
+            <div className="border-t border-surface-2 pt-4">
+              <h4 className="font-medium text-fg-2 mb-1">Effective limits</h4>
+              {hardwareMode && (
+                <div className="grid grid-cols-3 gap-3 mb-3">
+                  {(
+                    [
+                      ['limit_gpu', 'GPU limit override'],
+                      ['limit_cpu', 'CPU limit override'],
+                      ['limit_drive', 'Drive limit override'],
+                    ] as const
+                  ).map(([field, label]) => (
+                    <div key={field}>
+                      <label className="input-label">{label} (°C)</label>
+                      <input
+                        type="number"
+                        className="input"
+                        min={0}
+                        max={120}
+                        placeholder="hardware / default"
+                        value={formData[field] || ''}
+                        onChange={(e) => handleChange(field, e.target.value === '' ? 0 : parseInt(e.target.value))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {limitRows.length === 0 ? (
+                <p className="text-sm text-muted">No devices reported yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-muted-2 uppercase tracking-wide">
+                        <th className="py-1 pr-3">Device</th>
+                        <th className="py-1 pr-3">Now</th>
+                        <th className="py-1 pr-3">Limit</th>
+                        <th className="py-1 pr-3">Warn at</th>
+                        <th className="py-1 pr-3">Emergency at</th>
+                        <th className="py-1">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {limitRows.map((r) => {
+                        const override = overrideFor(r.kind);
+                        const limit = hardwareMode ? override ?? r.info.limit : formData.emergency_temp;
+                        const source = hardwareMode ? (override != null ? 'override' : r.info.limit_source) : 'legacy';
+                        const warnAt = hardwareMode ? (limit != null ? limit - warningMargin : undefined) : formData.warning_temp;
+                        const emergAt = hardwareMode ? (limit != null ? limit - emergencyMargin : undefined) : formData.emergency_temp;
+                        const status = r.info.status;
+                        return (
+                          <tr key={r.kind} className="border-t border-surface-2">
+                            <td className="py-1.5 pr-3">
+                              <span className="text-fg-2">{r.kind}</span>
+                              <span className="block text-xs text-muted truncate max-w-[16rem]" title={r.name}>
+                                {r.name}
+                              </span>
+                            </td>
+                            <td className="py-1.5 pr-3 tabular-nums text-fg-2">{Math.round(r.temp)} °C</td>
+                            <td className="py-1.5 pr-3 tabular-nums text-fg-2">
+                              {limit != null ? `${limit} °C` : '—'}
+                              {source && <span className="ml-1 text-xs text-muted-2">({source})</span>}
+                            </td>
+                            <td className="py-1.5 pr-3 tabular-nums text-fg-2">{warnAt != null ? `${warnAt} °C` : '—'}</td>
+                            <td className="py-1.5 pr-3 tabular-nums text-fg-2">{emergAt != null ? `${emergAt} °C` : '—'}</td>
+                            <td className={`py-1.5 capitalize ${status ? statusText[status] : 'text-muted'}`}>{status ?? '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             <div className="border-t border-surface-2 pt-4">

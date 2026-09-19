@@ -66,6 +66,20 @@ func initDefaultSettings() error {
 		models.SettingWarningTemp:       70,
 		models.SettingWarningEnabled:    true,
 		models.SettingSafetyOnShutdown:  true,
+		models.SettingWarningMargin:     15,
+		models.SettingEmergencyMargin:   5,
+	}
+
+	// Thermal limits mode: hardware-derived per-device limits for new installs,
+	// but an EXISTING install keeps today's single-threshold behaviour until the
+	// operator opts in — switching the emergency rule on upgrade would be a
+	// silent behaviour change.
+	var existingRows int64
+	DB.Model(&models.Setting{}).Count(&existingRows)
+	if existingRows > 0 {
+		defaults[models.SettingThermalLimitsMode] = models.ThermalModeLegacy
+	} else {
+		defaults[models.SettingThermalLimitsMode] = models.ThermalModeHardware
 	}
 
 	for key, value := range defaults {
@@ -118,10 +132,40 @@ func GetAllSettings() (*models.AppSettings, error) {
 		WarningTemp:       70,
 		WarningEnabled:    true,
 		SafetyOnShutdown:  true,
+		ThermalLimitsMode: models.ThermalModeHardware,
+		WarningMargin:     15,
+		EmergencyMargin:   5,
+	}
+
+	// A per-class limit override is stored as a number; 0/absent means none.
+	limitOverride := func(v any) *int {
+		if f, ok := v.(float64); ok && f > 0 {
+			n := int(f)
+			return &n
+		}
+		return nil
 	}
 
 	for _, s := range settings {
 		switch s.Key {
+		case models.SettingThermalLimitsMode:
+			if v, ok := s.Value.Data.(string); ok && v != "" {
+				result.ThermalLimitsMode = v
+			}
+		case models.SettingWarningMargin:
+			if v, ok := s.Value.Data.(float64); ok {
+				result.WarningMargin = int(v)
+			}
+		case models.SettingEmergencyMargin:
+			if v, ok := s.Value.Data.(float64); ok {
+				result.EmergencyMargin = int(v)
+			}
+		case models.SettingLimitGPU:
+			result.LimitGPU = limitOverride(s.Value.Data)
+		case models.SettingLimitCPU:
+			result.LimitCPU = limitOverride(s.Value.Data)
+		case models.SettingLimitDrive:
+			result.LimitDrive = limitOverride(s.Value.Data)
 		case models.SettingIPMIMode:
 			if v, ok := s.Value.Data.(string); ok {
 				result.IPMIMode = v

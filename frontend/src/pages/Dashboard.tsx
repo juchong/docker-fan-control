@@ -1,7 +1,7 @@
 import { useState, lazy, Suspense } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMonitoring } from '../hooks/useMonitoring';
-import type { DriveMetrics } from '../types/monitoring';
+import type { DriveMetrics, ThermalInfo, ThermalStatus } from '../types/monitoring';
 import { useMetricsHistory } from '../hooks/useMetricsHistory';
 import { useFanHealth } from '../hooks/useFanHealth';
 import { Card } from '../components/common/Card';
@@ -53,9 +53,22 @@ function tempTextClass(temp: number): string {
   return TONE_TEXT[tempTone(temp)];
 }
 
-// Drives report their own warning/critical thresholds (NVMe always does);
-// prefer those over the generic bands, which would flag a healthy 70 °C SSD.
-function driveTone(d: DriveMetrics): Tone {
+// Device colouring, in order of preference: the controller's per-device thermal
+// status (headroom to the device's own limit) when the backend provides it;
+// else the device's own thresholds (drives report max/crit); else the generic
+// bands. The fallbacks keep an older backend rendering exactly as before.
+type ThermalLike = ThermalInfo & { temperature: number; max?: number; crit?: number };
+
+const STATUS_TONE: Record<ThermalStatus, Tone> = { ok: 'ok', warning: 'warn', critical: 'danger' };
+
+function statusTone(status: ThermalStatus, temp: number): Tone {
+  // "ok" keeps the calm blue below 50 °C so idle devices don't all turn green.
+  if (status === 'ok') return tempTone(temp) === 'info' ? 'info' : 'ok';
+  return STATUS_TONE[status];
+}
+
+function deviceTone(d: ThermalLike): Tone {
+  if (d.status) return statusTone(d.status, d.temperature);
   const t = d.temperature;
   if (d.crit != null && t >= d.crit) return 'danger';
   if (d.max != null && t >= d.max) return 'warn';
@@ -63,8 +76,34 @@ function driveTone(d: DriveMetrics): Tone {
   return tempTone(t);
 }
 
+// Worst status in a list, for summary cards and section headers; undefined
+// when the backend annotated nothing (old backend) so callers fall back.
+function worstStatus(items: ThermalInfo[]): ThermalStatus | undefined {
+  let worst: ThermalStatus | undefined;
+  for (const i of items) {
+    if (!i.status) continue;
+    if (i.status === 'critical') return 'critical';
+    if (i.status === 'warning') worst = 'warning';
+    else if (!worst) worst = 'ok';
+  }
+  return worst;
+}
+
+function statusClass(status: ThermalStatus | undefined, temp: number): string {
+  return status ? TONE_TEXT[statusTone(status, temp)] : tempTextClass(temp);
+}
+
+// "· 12 °C to limit" suffix for a device card; empty when the backend gave none.
+function headroomText(d: ThermalInfo): string {
+  return d.headroom != null ? ` · ${d.headroom} °C to limit` : '';
+}
+
+function limitTooltip(d: ThermalInfo): string[] {
+  return d.limit != null ? [`limit ${d.limit} °C (${d.limit_source ?? 'unknown'})`] : [];
+}
+
 function driveTooltip(d: DriveMetrics): string {
-  const parts = (d.sensors ?? []).map((s) => `${s.label}: ${s.temperature.toFixed(1)} °C`);
+  const parts = [...limitTooltip(d), ...(d.sensors ?? []).map((s) => `${s.label}: ${s.temperature.toFixed(1)} °C`)];
   if (d.max != null) parts.push(`warning at ${d.max} °C`);
   if (d.crit != null) parts.push(`critical at ${d.crit} °C`);
   if (d.serial) parts.push(`S/N ${d.serial}`);
@@ -111,6 +150,7 @@ function CollapsibleSection({
   title,
   count,
   maxTemp,
+  status,
   icon: Icon,
   iconColor,
   children,
@@ -120,6 +160,8 @@ function CollapsibleSection({
   title: string;
   count: number;
   maxTemp?: number;
+  /** Worst thermal status in the section; colours the max when present. */
+  status?: ThermalStatus;
   icon: React.ComponentType<{ className?: string }>;
   iconColor: string;
   children: React.ReactNode[];
@@ -144,7 +186,7 @@ function CollapsibleSection({
           <span className="font-medium text-fg-2">{title}</span>
           <span className="text-sm text-muted">({count})</span>
           {maxTemp !== undefined && maxTemp > 0 && (
-            <span className={`text-sm font-medium ${tempTextClass(maxTemp)}`}>Max: {maxTemp.toFixed(1)}°C</span>
+            <span className={`text-sm font-medium ${statusClass(status, maxTemp)}`}>Max: {maxTemp.toFixed(1)}°C</span>
           )}
         </div>
         {expanded ? (
@@ -263,19 +305,23 @@ export function Dashboard() {
           label="Max GPU"
           value={maxGpuTemp > 0 ? `${maxGpuTemp}°C` : '--'}
           icon={Thermometer}
-          valueClass={maxGpuTemp > 0 ? tempTextClass(maxGpuTemp) : 'text-muted'}
+          valueClass={maxGpuTemp > 0 ? statusClass(worstStatus(monitoring?.gpus ?? []), maxGpuTemp) : 'text-muted'}
         />
         <StatCard
           label="Max CPU"
           value={maxCpuTemp > 0 ? `${maxCpuTemp}°C` : '--'}
           icon={Cpu}
-          valueClass={maxCpuTemp > 0 ? tempTextClass(maxCpuTemp) : 'text-muted'}
+          valueClass={
+            maxCpuTemp > 0 ? statusClass(worstStatus(monitoring?.system?.cpu_packages ?? []), maxCpuTemp) : 'text-muted'
+          }
         />
         <StatCard
           label="Max Drive"
           value={maxDriveTemp > 0 ? `${maxDriveTemp}°C` : '--'}
           icon={HardDrive}
-          valueClass={maxDriveTemp > 0 ? tempTextClass(maxDriveTemp) : 'text-muted'}
+          valueClass={
+            maxDriveTemp > 0 ? statusClass(worstStatus(monitoring?.system?.drives ?? []), maxDriveTemp) : 'text-muted'
+          }
         />
         <StatCard label="Fans" value={monitoring?.fans?.length || 0} icon={Fan} />
       </div>
@@ -380,19 +426,25 @@ export function Dashboard() {
               title="Graphics Cards"
               count={monitoring.gpus.length}
               maxTemp={maxGpuTemp}
+              status={worstStatus(monitoring.gpus)}
               icon={Activity}
               iconColor="text-info"
             >
               {monitoring.gpus.map((gpu) => (
-                <div key={gpu.index} className="flex items-center justify-between p-3 bg-surface-2/50 rounded-lg">
+                <div
+                  key={gpu.index}
+                  className="flex items-center justify-between p-3 bg-surface-2/50 rounded-lg"
+                  title={limitTooltip(gpu).join(' · ') || undefined}
+                >
                   <div>
                     <p className="font-medium text-fg-2">{gpu.name}</p>
                     <p className="text-sm text-muted">GPU {gpu.index}</p>
                   </div>
                   <div className="text-right">
-                    <p className={`text-xl font-bold ${tempTextClass(gpu.temperature)}`}>{gpu.temperature}°C</p>
+                    <p className={`text-xl font-bold ${TONE_TEXT[deviceTone(gpu)]}`}>{gpu.temperature}°C</p>
                     <p className="text-sm text-muted">
                       {gpu.load}% • {formatBytes(gpu.memory_used)} / {formatBytes(gpu.memory_total)}
+                      {headroomText(gpu)}
                     </p>
                   </div>
                 </div>
@@ -409,20 +461,26 @@ export function Dashboard() {
               title="CPU Packages"
               count={monitoring.system.cpu_packages.length}
               maxTemp={maxCpuTemp}
+              status={worstStatus(monitoring.system.cpu_packages)}
               icon={Cpu}
               iconColor="text-info"
             >
               {monitoring.system.cpu_packages.map((cpu) => (
-                <div key={cpu.index} className="flex items-start justify-between gap-3 p-3 bg-surface-2/50 rounded-lg">
+                <div
+                  key={cpu.index}
+                  className="flex items-start justify-between gap-3 p-3 bg-surface-2/50 rounded-lg"
+                  title={limitTooltip(cpu).join(' · ') || undefined}
+                >
                   <div className="min-w-0">
                     {/* Model names run long ("AMD Ryzen Threadripper 9960X 24-Cores");
                         wrap rather than truncate so the whole name is readable. */}
                     <p className="font-medium text-fg-2 break-words">{cpu.model || cpu.name}</p>
                     <p className="text-sm text-muted">
                       {cpu.model ? cpu.name : `CPU ${cpu.index}`}
+                      {headroomText(cpu)}
                     </p>
                   </div>
-                  <p className={`text-xl font-bold shrink-0 ${tempTextClass(cpu.temperature)}`}>{cpu.temperature.toFixed(0)}°C</p>
+                  <p className={`text-xl font-bold shrink-0 ${TONE_TEXT[deviceTone(cpu)]}`}>{cpu.temperature.toFixed(0)}°C</p>
                 </div>
               ))}
             </CollapsibleSection>
@@ -438,6 +496,7 @@ export function Dashboard() {
               title="Storage Drives"
               count={monitoring.system.drives.length}
               maxTemp={maxDriveTemp}
+              status={worstStatus(monitoring.system.drives)}
               icon={HardDrive}
               iconColor="text-info"
             >
@@ -453,10 +512,11 @@ export function Dashboard() {
                       <p className="font-medium text-fg-2 break-words">{drive.model || drive.device}</p>
                       <p className="text-sm text-muted">
                         {drive.device.replace(/^\/dev\//, '')} • {drive.type.toUpperCase()}
+                        {headroomText(drive)}
                       </p>
                     </div>
                   </div>
-                  <p className={`text-xl font-bold shrink-0 ${TONE_TEXT[driveTone(drive)]}`}>{drive.temperature}°C</p>
+                  <p className={`text-xl font-bold shrink-0 ${TONE_TEXT[deviceTone(drive)]}`}>{drive.temperature}°C</p>
                 </div>
               ))}
             </CollapsibleSection>

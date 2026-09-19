@@ -456,13 +456,29 @@ GET /api/settings
   "motherboard_model": "ROMED8-2T",
   "motherboard_driver": "asrock_romed8",
   "safety_on_shutdown": true,
-  "safety_max_temp": 85,
-  "safety_speed": 100,
+  "emergency_temp": 90,
+  "emergency_speed": 100,
   "warning_temp": 70,
   "warning_enabled": true,
+  "thermal_limits_mode": "hardware",
+  "warning_margin": 15,
+  "emergency_margin": 5,
+  "limit_gpu": null,
+  "limit_cpu": null,
+  "limit_drive": null,
   "control_interval": 5
 }
 ```
+
+Thermal limits: in `hardware` mode each GPU/CPU/drive is judged by headroom to
+its own limit (NVML threshold, hwmon crit, coretemp crit, or a class default;
+`limit_gpu`/`limit_cpu`/`limit_drive` override per class, `0` clears) —
+`warning` at `headroom <= warning_margin` (1–40), `critical` at
+`headroom <= emergency_margin` (0–20, must be below the warning margin). In
+`legacy` mode the single `warning_temp`/`emergency_temp` comparison applies;
+upgraded installs are seeded `legacy`. The monitoring payload carries the
+result per device (`limit`, `limit_source`, `headroom`, `status`) and in
+`controller.thermal` (`mode`, `status`, `emergency_active`, `worst`).
 
 ### Update Settings
 
@@ -473,8 +489,11 @@ PUT /api/settings
 **Request Body:**
 ```json
 {
-  "safety_max_temp": 90,
+  "emergency_temp": 90,
   "warning_temp": 75,
+  "thermal_limits_mode": "hardware",
+  "warning_margin": 15,
+  "emergency_margin": 5,
   "control_interval": 10,
   "zone_layout": {
     "zones": [

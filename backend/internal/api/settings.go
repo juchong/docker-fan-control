@@ -117,6 +117,46 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Thermal limits: validate the values as they will be AFTER this update
+	// (a partial PUT may change only one of the two margins).
+	current, _ := database.GetAllSettings()
+	if req.ThermalLimitsMode != nil && *req.ThermalLimitsMode != models.ThermalModeHardware && *req.ThermalLimitsMode != models.ThermalModeLegacy {
+		http.Error(w, "Thermal limits mode must be 'hardware' or 'legacy'", http.StatusBadRequest)
+		return
+	}
+	warnMargin, emergMargin := 15, 5
+	if current != nil {
+		warnMargin, emergMargin = current.WarningMargin, current.EmergencyMargin
+	}
+	if req.WarningMargin != nil {
+		if *req.WarningMargin < 1 || *req.WarningMargin > 40 {
+			http.Error(w, "Warning margin must be between 1 and 40°C of headroom", http.StatusBadRequest)
+			return
+		}
+		warnMargin = *req.WarningMargin
+	}
+	if req.EmergencyMargin != nil {
+		if *req.EmergencyMargin < 0 || *req.EmergencyMargin > 20 {
+			http.Error(w, "Emergency margin must be between 0 and 20°C of headroom", http.StatusBadRequest)
+			return
+		}
+		emergMargin = *req.EmergencyMargin
+	}
+	if emergMargin >= warnMargin {
+		http.Error(w, "Emergency margin must be smaller than the warning margin", http.StatusBadRequest)
+		return
+	}
+	for _, lim := range []struct {
+		name string
+		v    *int
+	}{{"GPU", req.LimitGPU}, {"CPU", req.LimitCPU}, {"drive", req.LimitDrive}} {
+		// 0 clears the override; otherwise it must be a plausible limit.
+		if lim.v != nil && *lim.v != 0 && (*lim.v < 30 || *lim.v > 120) {
+			http.Error(w, "The "+lim.name+" limit override must be between 30 and 120°C (0 clears it)", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Update IPMI settings
 	if req.IPMIMode != nil {
 		database.SetSetting(models.SettingIPMIMode, *req.IPMIMode)
@@ -185,6 +225,24 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.SafetyOnShutdown != nil {
 		database.SetSetting(models.SettingSafetyOnShutdown, *req.SafetyOnShutdown)
 	}
+	if req.ThermalLimitsMode != nil {
+		database.SetSetting(models.SettingThermalLimitsMode, *req.ThermalLimitsMode)
+	}
+	if req.WarningMargin != nil {
+		database.SetSetting(models.SettingWarningMargin, *req.WarningMargin)
+	}
+	if req.EmergencyMargin != nil {
+		database.SetSetting(models.SettingEmergencyMargin, *req.EmergencyMargin)
+	}
+	if req.LimitGPU != nil {
+		database.SetSetting(models.SettingLimitGPU, *req.LimitGPU)
+	}
+	if req.LimitCPU != nil {
+		database.SetSetting(models.SettingLimitCPU, *req.LimitCPU)
+	}
+	if req.LimitDrive != nil {
+		database.SetSetting(models.SettingLimitDrive, *req.LimitDrive)
+	}
 
 	// Update IPMI service configuration
 	settings, _ := database.GetAllSettings()
@@ -197,13 +255,7 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.ipmi.UpdateConfig(settings.IPMIMode, settings.IPMIHost, settings.IPMIUser, ipmiPass)
 
 	// Update controller settings
-	h.controller.UpdateSettings(
-		float64(settings.EmergencyTemp),
-		float64(settings.EmergencySpeed),
-		float64(settings.WarningTemp),
-		settings.WarningEnabled,
-		time.Duration(settings.ControlInterval)*time.Second,
-	)
+	h.controller.UpdateSettings(settings)
 
 	h.logger.Info(models.CategorySystem, "Settings updated", nil)
 

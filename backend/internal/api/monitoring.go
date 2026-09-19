@@ -75,6 +75,9 @@ func (h *MonitoringHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		monitoring.System = *sysMetrics
 	}
 
+	// Per-device thermal annotation (limit / headroom / status).
+	h.controller.AnnotateThermal(monitoring.GPUs, &monitoring.System)
+
 	// Get fan status
 	fans, _ := h.fans.List(r.Context())
 	readings, _ := h.ipmi.GetFanReadings(r.Context())

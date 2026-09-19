@@ -260,12 +260,21 @@ func (s *SystemService) GetCPUPackageTemperatures() []models.CPUPackageMetrics {
 					if displayName == "" {
 						displayName = name
 					}
-					packages = append(packages, models.CPUPackageMetrics{
+					pkg := models.CPUPackageMetrics{
 						Index:       packageIndex,
 						Name:        displayName,
 						Model:       cpuModel,
 						Temperature: temp,
-					})
+					}
+					// Intel coretemp publishes the package's TjMax as tempN_crit
+					// (tempN_max is the lower "high" mark); k10temp publishes
+					// neither, so AMD falls back to the class default.
+					base := strings.TrimSuffix(tf, "_input")
+					if crit := plausibleThreshold(readTrim(base + "_crit")); crit != nil {
+						pkg.Limit = crit
+						pkg.LimitSource = name
+					}
+					packages = append(packages, pkg)
 					packageIndex++
 				}
 			}

@@ -1,7 +1,39 @@
 import { FanStatus } from './fan';
 import { ZoneLayout, ZoneDefinition } from './zone';
 
-export interface GPUMetrics {
+/** Per-device thermal annotation from the controller (absent on older backends). */
+export type ThermalStatus = 'ok' | 'warning' | 'critical';
+
+export interface ThermalInfo {
+  /** The device's own limit (throttle/critical point), °C. */
+  limit?: number;
+  /** Where the limit came from: nvml, hwmon, coretemp, default, override, legacy. */
+  limit_source?: string;
+  /** °C to the limit (negative = over). */
+  headroom?: number;
+  status?: ThermalStatus;
+}
+
+export interface ThermalDevice {
+  kind: 'gpu' | 'cpu' | 'drive';
+  index: number;
+  name: string;
+  temperature: number;
+  limit: number;
+  headroom: number;
+  status: ThermalStatus;
+}
+
+export interface ThermalState {
+  mode: 'hardware' | 'legacy';
+  status: ThermalStatus;
+  emergency_active: boolean;
+  warning_margin: number;
+  emergency_margin: number;
+  worst?: ThermalDevice;
+}
+
+export interface GPUMetrics extends ThermalInfo {
   index: number;
   name: string;
   temperature: number;
@@ -13,7 +45,7 @@ export interface GPUMetrics {
   power_limit?: number;
 }
 
-export interface CPUPackageMetrics {
+export interface CPUPackageMetrics extends ThermalInfo {
   index: number;
   name: string;
   model?: string;
@@ -25,7 +57,7 @@ export interface DriveSensor {
   temperature: number;
 }
 
-export interface DriveMetrics {
+export interface DriveMetrics extends ThermalInfo {
   index: number;
   device: string;
   model: string;
@@ -83,6 +115,8 @@ export interface ControllerState {
   driver_capabilities?: DriverCapabilities;
   /** Live driver health issues, e.g. firmware overriding PWM writes. */
   driver_warnings?: string[];
+  /** Last thermal evaluation against per-device limits (absent on older backends). */
+  thermal?: ThermalState;
 }
 
 

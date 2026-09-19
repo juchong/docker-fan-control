@@ -55,7 +55,18 @@ const (
 	SettingWarningTemp       = "warning_temp"        // temperature for warning logs
 	SettingWarningEnabled    = "warning_enabled"     // whether to log warnings
 	SettingSafetyOnShutdown  = "safety_on_shutdown"  // set fans to 100% on shutdown
-	
+
+	// Thermal limits (headroom-based, per device). "legacy" reproduces the
+	// single warning_temp/emergency_temp comparison; "hardware" derives each
+	// device's limit (NVML, hwmon, coretemp, or a class default) and applies
+	// the margins below to its headroom.
+	SettingThermalLimitsMode = "thermal_limits_mode" // "hardware" or "legacy"
+	SettingWarningMargin     = "warning_margin"      // °C of headroom at/below which a device is "warning"
+	SettingEmergencyMargin   = "emergency_margin"    // °C of headroom at/below which a device is "critical"
+	SettingLimitGPU          = "limit_gpu"           // optional absolute per-class limit overrides (°C)
+	SettingLimitCPU          = "limit_cpu"
+	SettingLimitDrive        = "limit_drive"
+
 	// Motherboard settings
 	SettingMotherboardVendor = "motherboard_vendor" // Motherboard vendor (e.g., "ASRock Rack")
 	SettingMotherboardModel  = "motherboard_model"  // Motherboard model (e.g., "ROMED8-2T")
@@ -102,7 +113,15 @@ type AppSettings struct {
 	WarningTemp       int    `json:"warning_temp"`
 	WarningEnabled    bool   `json:"warning_enabled"`
 	SafetyOnShutdown  bool   `json:"safety_on_shutdown"` // Set fans to 100% when stopping
-	
+
+	// Thermal limits (see SettingThermalLimitsMode). Overrides are nil when unset.
+	ThermalLimitsMode string `json:"thermal_limits_mode"`
+	WarningMargin     int    `json:"warning_margin"`
+	EmergencyMargin   int    `json:"emergency_margin"`
+	LimitGPU          *int   `json:"limit_gpu,omitempty"`
+	LimitCPU          *int   `json:"limit_cpu,omitempty"`
+	LimitDrive        *int   `json:"limit_drive,omitempty"`
+
 	// Motherboard-specific settings
 	MotherboardVendor string      `json:"motherboard_vendor,omitempty"`
 	MotherboardModel  string      `json:"motherboard_model,omitempty"`
@@ -125,7 +144,15 @@ type UpdateSettingsRequest struct {
 	WarningTemp       *int    `json:"warning_temp,omitempty"`
 	WarningEnabled    *bool   `json:"warning_enabled,omitempty"`
 	SafetyOnShutdown  *bool   `json:"safety_on_shutdown,omitempty"`
-	
+
+	// Thermal limits. A per-class override of 0 clears it (back to hardware/default).
+	ThermalLimitsMode *string `json:"thermal_limits_mode,omitempty"`
+	WarningMargin     *int    `json:"warning_margin,omitempty"`
+	EmergencyMargin   *int    `json:"emergency_margin,omitempty"`
+	LimitGPU          *int    `json:"limit_gpu,omitempty"`
+	LimitCPU          *int    `json:"limit_cpu,omitempty"`
+	LimitDrive        *int    `json:"limit_drive,omitempty"`
+
 	// Motherboard-specific settings
 	MotherboardVendor *string `json:"motherboard_vendor,omitempty"`
 	MotherboardModel  *string `json:"motherboard_model,omitempty"`
@@ -142,7 +169,50 @@ type Monitoring struct {
 }
 
 // GPUMetrics represents metrics for a single GPU
+// ThermalInfo is the per-device thermal annotation shared by GPU, CPU and
+// drive metrics: the device's limit (throttle/critical point), where it came
+// from, the headroom to it, and the resulting status. All omitted when the
+// controller has not evaluated the device.
+type ThermalInfo struct {
+	Limit       *int   `json:"limit,omitempty"`        // °C
+	LimitSource string `json:"limit_source,omitempty"` // "nvml", "hwmon", "coretemp", "default", "override", "legacy"
+	Headroom    *int   `json:"headroom,omitempty"`     // °C to the limit (negative = over)
+	Status      string `json:"status,omitempty"`       // ThermalOK / ThermalWarning / ThermalCritical
+}
+
+// Thermal statuses.
+const (
+	ThermalOK       = "ok"
+	ThermalWarning  = "warning"
+	ThermalCritical = "critical"
+
+	ThermalModeHardware = "hardware"
+	ThermalModeLegacy   = "legacy"
+)
+
+// ThermalDevice identifies the device closest to its limit.
+type ThermalDevice struct {
+	Kind        string  `json:"kind"` // "gpu", "cpu", "drive"
+	Index       int     `json:"index"`
+	Name        string  `json:"name"`
+	Temperature float64 `json:"temperature"`
+	Limit       int     `json:"limit"`
+	Headroom    int     `json:"headroom"`
+	Status      string  `json:"status"`
+}
+
+// ThermalState summarises the last thermal evaluation.
+type ThermalState struct {
+	Mode            string         `json:"mode"`
+	Status          string         `json:"status"` // worst device status
+	EmergencyActive bool           `json:"emergency_active"`
+	WarningMargin   int            `json:"warning_margin"`
+	EmergencyMargin int            `json:"emergency_margin"`
+	Worst           *ThermalDevice `json:"worst,omitempty"`
+}
+
 type GPUMetrics struct {
+	ThermalInfo
 	Index       int     `json:"index"`
 	Name        string  `json:"name"`
 	Temperature int     `json:"temperature"` // Celsius
@@ -174,6 +244,7 @@ type BoardTempMetrics struct {
 
 // CPUPackageMetrics represents metrics for a single CPU package/socket
 type CPUPackageMetrics struct {
+	ThermalInfo
 	Index       int     `json:"index"`
 	Name        string  `json:"name"`        // sensor label, e.g., "Package id 0", "Tctl"
 	Model       string  `json:"model"`       // marketing name, e.g., "AMD Ryzen 9 9950X"
@@ -182,6 +253,7 @@ type CPUPackageMetrics struct {
 
 // DriveMetrics represents metrics for a single storage drive
 type DriveMetrics struct {
+	ThermalInfo
 	Index       int           `json:"index"`
 	Device      string        `json:"device"`             // e.g., "/dev/sda", "/dev/nvme0n1"
 	Model       string        `json:"model"`              // e.g., "WD Red 4TB"
@@ -219,6 +291,7 @@ type ControllerState struct {
 	DriverModel        string            `json:"driver_model,omitempty"`
 	DriverCapabilities DriverCapabilities `json:"driver_capabilities,omitempty"`
 	DriverWarnings     []string          `json:"driver_warnings,omitempty"` // live driver health issues (e.g. firmware overriding writes)
+	Thermal            *ThermalState     `json:"thermal,omitempty"`         // last thermal evaluation (per-device limits)
 }
 
 // DriverCapabilities represents driver capabilities

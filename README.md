@@ -261,8 +261,17 @@ Adding a board usually means a new driver — see
 Fan control can overheat hardware if it misbehaves, so the controller is
 deliberately conservative:
 
-- **Emergency & warning thresholds** — above the emergency temperature all
-  managed fans go to full; a warning threshold logs before that.
+- **Per-device thermal limits** — every GPU, CPU and drive is judged by how far
+  it is from *its own* limit: the GPU's throttle point (NVML), the NVMe drive's
+  critical temperature (hwmon), an Intel CPU's TjMax (coretemp), else a
+  conservative class default, with optional per-class overrides. A device within
+  the *warning margin* (default 15 °C) logs a warning naming it; within the
+  *emergency margin* (default 5 °C) all managed fans go to the emergency speed,
+  held with hysteresis until headroom is comfortably back. Existing installs
+  keep the classic single `warning_temp` / `emergency_temp` comparison
+  (`thermal_limits_mode: legacy`) until you switch in Settings → Safety, where
+  an "Effective limits" table shows each device's limit and where the margins
+  put its warning and emergency points.
 - **Sensor loss** — the emergency trip only arms after valid readings are seen
   and only for profiles that actually use temperature inputs, with a startup
   grace window, so a load-only profile or a not-yet-ready sensor at boot doesn't

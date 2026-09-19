@@ -14,6 +14,36 @@ type GPUService struct {
 	initialized bool
 	deviceCount int
 	mu          sync.RWMutex
+
+	// Per-device thermal limit from NVML, read once (thresholds don't change).
+	// A nil entry means the driver reported none.
+	limits   map[int]*int
+	limitsMu sync.Mutex
+}
+
+// thermalLimit returns the GPU's own limit: the "max operating" threshold
+// (above it the GPU is out of spec), falling back to the slowdown threshold.
+// Newer drivers describe these as T.Limit offsets, but still answer the
+// absolute thresholds (verified: GPU_MAX 93 / SLOWDOWN 95 on RTX PRO 6000).
+func (s *GPUService) thermalLimit(index int, device nvml.Device) *int {
+	s.limitsMu.Lock()
+	defer s.limitsMu.Unlock()
+	if s.limits == nil {
+		s.limits = make(map[int]*int)
+	}
+	if v, ok := s.limits[index]; ok {
+		return v
+	}
+	var limit *int
+	for _, th := range []nvml.TemperatureThresholds{nvml.TEMPERATURE_THRESHOLD_GPU_MAX, nvml.TEMPERATURE_THRESHOLD_SLOWDOWN} {
+		if v, ret := device.GetTemperatureThreshold(th); ret == nvml.SUCCESS && v > 0 && v < 150 {
+			n := int(v)
+			limit = &n
+			break
+		}
+	}
+	s.limits[index] = limit
+	return limit
 }
 
 // NewGPUService creates a new GPU service
@@ -87,6 +117,11 @@ func (s *GPUService) GetMetrics() ([]models.GPUMetrics, error) {
 		temp, ret := device.GetTemperature(nvml.TEMPERATURE_GPU)
 		if ret == nvml.SUCCESS {
 			metric.Temperature = int(temp)
+		}
+		if limit := s.thermalLimit(i, device); limit != nil {
+			l := *limit
+			metric.Limit = &l
+			metric.LimitSource = "nvml"
 		}
 
 		// Get utilization

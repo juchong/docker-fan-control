@@ -36,6 +36,24 @@ export function DegradedBanner() {
           'No controllable fan driver is active — fan speeds are not being managed. Check the driver in Settings.',
       };
     }
+    // Thermal state against per-device limits (absent on older backends).
+    const thermal = controller?.thermal;
+    const worst = thermal?.worst;
+    const describe = () => {
+      if (!worst) return 'a device is at its thermal limit';
+      const kind = { gpu: 'GPU', cpu: 'CPU', drive: 'Drive' }[worst.kind] ?? worst.kind;
+      const label = `${kind} ${worst.index}${worst.name ? ` (${worst.name})` : ''}`;
+      return thermal?.mode === 'legacy'
+        ? `${label} is at ${Math.round(worst.temperature)} °C`
+        : `${label} is ${worst.headroom} °C from its limit (${worst.limit} °C)`;
+    };
+    if (thermal?.status === 'critical') {
+      return {
+        severity: 'danger',
+        icon: OctagonAlert,
+        message: `Thermal emergency: ${describe()} — all fans at emergency speed.`,
+      };
+    }
     if (controller && controller.running === false) {
       return {
         severity: 'warning',
@@ -43,6 +61,9 @@ export function DegradedBanner() {
         message:
           'The fan controller is stopped. Fans are running at firmware defaults until you start it.',
       };
+    }
+    if (thermal?.status === 'warning') {
+      return { severity: 'warning', icon: AlertTriangle, message: `Running warm: ${describe()}.` };
     }
     // Driver-reported health issues, e.g. the board firmware/EC re-asserting
     // its own duty over what we command (Gigabyte boards need the BIOS Smart

@@ -231,6 +231,9 @@ func (h *WebSocketHandler) gatherMetrics() *models.Monitoring {
 		monitoring.System = *sysMetrics
 	}
 
+	// Per-device thermal annotation (limit / headroom / status).
+	h.controller.AnnotateThermal(monitoring.GPUs, &monitoring.System)
+
 	// Get fan status
 	ctx := context.Background()
 	fans, _ := h.fans.List(ctx)
