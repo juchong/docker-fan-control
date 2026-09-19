@@ -11,6 +11,7 @@ import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../components/common/Toast';
 import { HelpTip } from '../components/common/HelpTip';
+import { useFanHealth, FanState } from '../hooks/useFanHealth';
 import {
   ProfileSummary, Profile, ProfileInput, LinearParams, StepParams, PIDParams,
   AlgorithmParams, InputAggregation,
@@ -21,10 +22,21 @@ import {
   Cpu, HardDrive, Activity, Layers, Thermometer,
 } from 'lucide-react';
 
-interface ZoneOption { id: number; name: string }
+interface ZoneOption {
+  id: number;
+  /** The driver's zone name, e.g. "it8689 fan1". */
+  name: string;
+  /** The user's label for the fan(s) on this zone, when it differs from the zone name. */
+  label?: string;
+  /** Health of the fan(s) on this zone; undefined when no detected fan maps to it. */
+  state?: FanState;
+}
 
+// The active driver's zones, joined with the live fan list so the picker can
+// show the user's fan labels and grey out outputs with nothing on them.
 function useDriverZones(): ZoneOption[] {
   const { data: monitoring } = useMonitoring();
+  const fanHealth = useFanHealth();
   const { data: drivers } = useQuery<DriverInfo[]>({
     queryKey: ['drivers'],
     queryFn: settingsApi.getAvailableDrivers,
@@ -32,7 +44,26 @@ function useDriverZones(): ZoneOption[] {
   const activeVendor =
     monitoring?.controller?.driver_vendor || monitoring?.controller?.motherboard_vendor;
   const active = (drivers || []).find((d) => d.vendor === activeVendor) || (drivers || [])[0];
-  return active?.zone_layout?.zones?.map((z) => ({ id: z.id, name: z.name })) ?? [];
+  const layout = active?.zone_layout?.zones;
+  const fans = monitoring?.fans;
+
+  return useMemo(() => {
+    return (layout ?? []).map((z): ZoneOption => {
+      const inZone = (fans ?? []).filter((f) => f.ipmi_zone === z.id);
+      // FanStatus.label is the display name (user label, else detected name),
+      // so it only differs from the zone name when the user labelled the fan.
+      const labels = inZone.map((f) => f.label).filter((l) => l && l !== z.name);
+      const states = inZone.map(fanHealth);
+      const state: FanState | undefined = !states.length
+        ? undefined
+        : states.includes('running')
+          ? 'running'
+          : states.includes('failed')
+            ? 'failed'
+            : 'idle';
+      return { id: z.id, name: z.name, label: labels.length ? labels.join(' + ') : undefined, state };
+    });
+  }, [layout, fans, fanHealth]);
 }
 
 export function Profiles() {
@@ -42,7 +73,10 @@ export function Profiles() {
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const zones = useDriverZones();
-  const zoneName = (id: number) => zones.find((z) => z.id === id)?.name ?? `Zone ${id}`;
+  const zoneName = (id: number) => {
+    const z = zones.find((o) => o.id === id);
+    return z ? z.label ?? z.name : `Zone ${id}`;
+  };
 
   const { data: profiles, isLoading } = useQuery({
     queryKey: ['profiles'],
@@ -737,14 +771,44 @@ function ProfileEditor({ isOpen, onClose, profile, zones, onSave, isLoading }: P
           {zones.length > 0 ? (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {zones.map((zone) => (
-                  <label key={zone.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
-                    selectedZones.includes(zone.id) ? 'bg-info/15 border border-primary-600' : 'bg-surface-2/50 border border-surface-3 hover:border-muted-2'}`}>
-                    <input type="checkbox" checked={selectedZones.includes(zone.id)} className="rounded"
-                      onChange={(e) => setSelectedZones(e.target.checked ? [...selectedZones, zone.id] : selectedZones.filter((z) => z !== zone.id))} />
-                    <span className="text-sm text-fg-2">{zone.name}</span>
-                  </label>
-                ))}
+                {zones.map((zone) => {
+                  const selected = selectedZones.includes(zone.id);
+                  // Idle = nothing spinning on this output (empty header). Still
+                  // selectable — a fan may be plugged in later — but dimmed.
+                  const idle = zone.state === 'idle';
+                  const failed = zone.state === 'failed';
+                  const hint = idle ? 'no fan' : failed ? 'no RPM' : '';
+                  return (
+                    <label
+                      key={zone.id}
+                      title={
+                        idle
+                          ? 'No fan detected on this output (0 RPM).'
+                          : failed
+                            ? 'This fan reported RPM before but reads 0 now.'
+                            : undefined
+                      }
+                      className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
+                        selected ? 'bg-info/15 border border-primary-600' : 'bg-surface-2/50 border border-surface-3 hover:border-muted-2'
+                      } ${idle ? 'opacity-50' : ''}`}
+                    >
+                      <input type="checkbox" checked={selected} className="rounded"
+                        onChange={(e) => setSelectedZones(e.target.checked ? [...selectedZones, zone.id] : selectedZones.filter((z) => z !== zone.id))} />
+                      <span className="min-w-0">
+                        <span className={`block text-sm truncate ${idle ? 'text-muted' : 'text-fg-2'}`}>
+                          {zone.label ?? zone.name}
+                        </span>
+                        {(zone.label || hint) && (
+                          <span className={`block text-[11px] truncate ${failed ? 'text-warn' : 'text-muted-2'}`}>
+                            {zone.label ? zone.name : ''}
+                            {zone.label && hint ? ' · ' : ''}
+                            {hint}
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
               {staleZones.length > 0 && (
                 <p className="text-xs text-warn mt-2" role="status">
