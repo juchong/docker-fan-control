@@ -53,6 +53,11 @@ type FanController struct {
 	algoSig          map[uint]string   // profileID -> algo type + params signature
 	profileLastInput map[uint]float64  // profileID -> last aggregated input (hysteresis)
 
+	// profileDuties is the duty each active profile computed on the last cycle
+	// (monitoring only — surfaced in GetState for the dashboard's per-profile
+	// duty plot). Written under mu from the control goroutine, read in GetState.
+	profileDuties map[uint]int // profileID -> computed duty %
+
 	// Startup + shutdown behavior
 	startupMode      string
 	startupPercent   int
@@ -96,6 +101,7 @@ func NewFanController(ipmi *IPMIService, gpu *GPUService, system *SystemService,
 		algoInstances:    make(map[uint]algorithms.Algorithm),
 		algoSig:          make(map[uint]string),
 		profileLastInput: make(map[uint]float64),
+		profileDuties:    make(map[uint]int),
 		emergencyTemp:   90,
 		emergencySpeed:  100,
 		warningTemp:     70,
@@ -554,6 +560,7 @@ func (c *FanController) controlCycle(ctx context.Context) {
 	zoneControllingProfile := make(map[int]uint) // Track which profile controls each zone
 	zoneControllingPriority := make(map[int]int)  // Track priority of controlling profile
 	zoneConflictCount := make(map[int]int)        // Track conflict count per zone
+	duties := make(map[uint]int, len(profiles))   // per-profile computed duty (monitoring only)
 	hasAnyZones := false
 
 	for _, profile := range profiles {
@@ -572,6 +579,7 @@ func (c *FanController) controlCycle(ctx context.Context) {
 		// Persistent algorithm instance (preserves PID integral/derivative state).
 		algo := c.getAlgorithm(&profile)
 		targetSpeed := algo.Calculate(inputValue)
+		duties[profile.ID] = targetSpeed
 
 		// Apply to zones from Zones field (new way - takes priority)
 		if len(profile.Zones) > 0 {
@@ -610,6 +618,11 @@ func (c *FanController) controlCycle(ctx context.Context) {
 		// If no zones configured, skip this profile
 		continue
 		}
+
+	// Publish per-profile computed duties for the dashboard (monitoring only).
+	c.mu.Lock()
+	c.profileDuties = duties
+	c.mu.Unlock()
 
 	// If no zones assigned, skip this cycle (require zones to be configured)
 	if !hasAnyZones {
@@ -1058,6 +1071,15 @@ func (c *FanController) GetState() models.ControllerState {
 		for _, p := range profiles {
 			state.ActiveProfiles = append(state.ActiveProfiles, p.Name)
 			state.ActiveProfileIDs = append(state.ActiveProfileIDs, p.ID)
+			// Per-profile computed duty, for the dashboard's per-profile plot.
+			// Only while running (a stopped controller isn't driving anything);
+			// only profiles with a recorded cycle (a just-activated one is absent
+			// until the next cycle rather than showing a stale/zero value).
+			if state.Running {
+				if duty, ok := c.profileDuties[p.ID]; ok {
+					state.ProfileDuties = append(state.ProfileDuties, models.ProfileDuty{ID: p.ID, Name: p.Name, Duty: duty})
+				}
+			}
 		}
 	}
 

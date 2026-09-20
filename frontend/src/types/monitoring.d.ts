@@ -102,10 +102,19 @@ export interface DriverCapabilities {
   firmware_fallback?: boolean;
 }
 
+/** Per active profile: the duty its curve computed on the last control cycle. */
+export interface ProfileDuty {
+  id: number;
+  name: string;
+  duty: number;
+}
+
 export interface ControllerState {
   running: boolean;
   active_profiles?: string[];
   active_profile_ids?: number[];
+  /** Per-profile computed duty %, for the dashboard's per-profile plot (absent on older backends). */
+  profile_duties?: ProfileDuty[];
   last_update?: string;
   manual_mode: boolean;
   motherboard_vendor?: string;

@@ -7,7 +7,8 @@ export interface MetricSample {
   cpu: number | null; // max CPU temp °C
   drive: number | null; // max drive temp °C
   board: number | null; // max board temp °C
-  duty: number | null; // max fan duty %
+  duty: number | null; // max fan duty % (aggregate; fallback when no profiles active)
+  duties?: Record<string, number>; // per active profile name -> computed duty %
   gpuLoad: number | null; // max GPU load %
   cpuLoad: number | null; // system CPU load %
 }
@@ -62,6 +63,15 @@ export function recordSample(m: Monitoring | null) {
   if (now - lastRecorded < MIN_INTERVAL_MS) return;
   lastRecorded = now;
 
+  // Per-profile computed duties (monitoring only), keyed by profile name so the
+  // chart can plot one line per profile. Absent on older backends.
+  let duties: Record<string, number> | undefined;
+  const pd = m.controller?.profile_duties;
+  if (pd && pd.length) {
+    duties = {};
+    for (const p of pd) duties[p.name] = p.duty;
+  }
+
   const sample: MetricSample = {
     t: now,
     gpu: max((m.gpus ?? []).map((g) => g.temperature)),
@@ -69,6 +79,7 @@ export function recordSample(m: Monitoring | null) {
     drive: max((m.system?.drives ?? []).map((d) => d.temperature)),
     board: max((m.system?.board_temps ?? []).map((b) => b.temperature)),
     duty: max((m.fans ?? []).map((f) => f.current_duty).filter((d) => d >= 0)),
+    duties,
     gpuLoad: max((m.gpus ?? []).map((g) => g.load)),
     cpuLoad: typeof m.system?.cpu_load === 'number' ? m.system.cpu_load : null,
   };

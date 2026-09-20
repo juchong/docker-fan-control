@@ -131,17 +131,19 @@ function StatCard({
   icon: React.ComponentType<{ className?: string }>;
   valueClass?: string;
 }) {
+  // Two fixed rows — label + icon on top, value below — so the icon always sits
+  // top-right aligned with the label, and every card's value starts at the same
+  // height. A long value (e.g. the multi-chip driver name) then wraps downward
+  // without shifting the icon or breaking alignment with its neighbours.
   return (
-    <div className="bg-surface border border-line rounded-lg p-4">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm text-muted truncate">{label}</p>
-          <p className={`text-2xl font-bold ${valueClass}`}>{value}</p>
-        </div>
+    <div className="bg-surface border border-line rounded-lg p-4 flex flex-col gap-2">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm text-muted truncate min-w-0">{label}</p>
         <div className="p-2 bg-surface-2 rounded-lg shrink-0">
           <Icon className="w-5 h-5 text-muted" />
         </div>
       </div>
+      <p className={`text-2xl font-bold leading-tight break-words ${valueClass}`}>{value}</p>
     </div>
   );
 }
@@ -258,6 +260,14 @@ export function Dashboard() {
   const maxDriveTemp = Math.max(...(monitoring?.system?.drives?.map((d) => d.temperature) || [0]));
   const activeProfiles = monitoring?.controller?.active_profiles ?? [];
 
+  // Count fans that actually have something connected: the driver exposes one
+  // zone per PWM header (10 here), but an empty header reads 0 RPM and never
+  // spins → "idle". Count the running/failed ones so the stat reflects real
+  // fans, not every header. Failed still counts — it's a connected fan that
+  // stopped, flagged separately on its gauge.
+  const fans = monitoring?.fans ?? [];
+  const activeFanCount = fans.filter((f) => fanHealth(f) !== 'idle').length;
+
   return (
     <div className="space-y-6">
       {/* Title + promoted controller control */}
@@ -303,13 +313,13 @@ export function Dashboard() {
         />
         <StatCard
           label="Max GPU"
-          value={maxGpuTemp > 0 ? `${maxGpuTemp}°C` : '--'}
+          value={maxGpuTemp > 0 ? `${maxGpuTemp.toFixed(1)}°C` : '--'}
           icon={Thermometer}
           valueClass={maxGpuTemp > 0 ? statusClass(worstStatus(monitoring?.gpus ?? []), maxGpuTemp) : 'text-muted'}
         />
         <StatCard
           label="Max CPU"
-          value={maxCpuTemp > 0 ? `${maxCpuTemp}°C` : '--'}
+          value={maxCpuTemp > 0 ? `${maxCpuTemp.toFixed(1)}°C` : '--'}
           icon={Cpu}
           valueClass={
             maxCpuTemp > 0 ? statusClass(worstStatus(monitoring?.system?.cpu_packages ?? []), maxCpuTemp) : 'text-muted'
@@ -317,13 +327,13 @@ export function Dashboard() {
         />
         <StatCard
           label="Max Drive"
-          value={maxDriveTemp > 0 ? `${maxDriveTemp}°C` : '--'}
+          value={maxDriveTemp > 0 ? `${maxDriveTemp.toFixed(1)}°C` : '--'}
           icon={HardDrive}
           valueClass={
             maxDriveTemp > 0 ? statusClass(worstStatus(monitoring?.system?.drives ?? []), maxDriveTemp) : 'text-muted'
           }
         />
-        <StatCard label="Fans" value={monitoring?.fans?.length || 0} icon={Fan} />
+        <StatCard label="Active Fans" value={activeFanCount} icon={Fan} />
       </div>
 
       {/* Time series */}
@@ -441,7 +451,7 @@ export function Dashboard() {
                     <p className="text-sm text-muted">GPU {gpu.index}</p>
                   </div>
                   <div className="text-right">
-                    <p className={`text-xl font-bold ${TONE_TEXT[deviceTone(gpu)]}`}>{gpu.temperature}°C</p>
+                    <p className={`text-xl font-bold ${TONE_TEXT[deviceTone(gpu)]}`}>{gpu.temperature.toFixed(1)}°C</p>
                     <p className="text-sm text-muted">
                       {gpu.load}% • {formatBytes(gpu.memory_used)} / {formatBytes(gpu.memory_total)}
                       {headroomText(gpu)}
@@ -480,7 +490,7 @@ export function Dashboard() {
                       {headroomText(cpu)}
                     </p>
                   </div>
-                  <p className={`text-xl font-bold shrink-0 ${TONE_TEXT[deviceTone(cpu)]}`}>{cpu.temperature.toFixed(0)}°C</p>
+                  <p className={`text-xl font-bold shrink-0 ${TONE_TEXT[deviceTone(cpu)]}`}>{cpu.temperature.toFixed(1)}°C</p>
                 </div>
               ))}
             </CollapsibleSection>
@@ -516,7 +526,7 @@ export function Dashboard() {
                       </p>
                     </div>
                   </div>
-                  <p className={`text-xl font-bold shrink-0 ${TONE_TEXT[deviceTone(drive)]}`}>{drive.temperature}°C</p>
+                  <p className={`text-xl font-bold shrink-0 ${TONE_TEXT[deviceTone(drive)]}`}>{drive.temperature.toFixed(1)}°C</p>
                 </div>
               ))}
             </CollapsibleSection>

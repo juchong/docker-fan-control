@@ -12,28 +12,44 @@ import {
 import { MetricSample } from '../../hooks/useMetricsHistory';
 
 type Variant = 'temp' | 'load';
+type DutyAxis = 'duty' | 'pct';
 
 interface SeriesDef {
-  key: keyof Omit<MetricSample, 't'>;
+  key: keyof Omit<MetricSample, 't' | 'duties'>;
   name: string;
   color: string;
   axis: 'temp' | 'duty' | 'pct';
   dashed?: boolean;
 }
 
+// Temperature / load lines (solid). Fan duty is handled separately so it can be
+// split into one line per active profile.
 const TEMP_SERIES: SeriesDef[] = [
   { key: 'gpu', name: 'GPU', color: 'rgb(var(--c-danger))', axis: 'temp' },
   { key: 'cpu', name: 'CPU', color: 'rgb(var(--c-info))', axis: 'temp' },
   { key: 'drive', name: 'Drive', color: '#22d3ee', axis: 'temp' },
   { key: 'board', name: 'Board', color: 'rgb(var(--c-warn))', axis: 'temp' },
-  { key: 'duty', name: 'Fan duty', color: 'rgb(var(--c-ok))', axis: 'duty', dashed: true },
 ];
 
 const LOAD_SERIES: SeriesDef[] = [
   { key: 'gpuLoad', name: 'GPU load', color: 'rgb(var(--c-info))', axis: 'pct' },
   { key: 'cpuLoad', name: 'CPU load', color: '#a78bfa', axis: 'pct' },
-  { key: 'duty', name: 'Fan duty', color: 'rgb(var(--c-ok))', axis: 'pct', dashed: true },
 ];
+
+// Distinct dashed colours for the per-profile duty lines, chosen to stay clear
+// of the solid temp/load colours above.
+const PROFILE_COLORS = [
+  'rgb(var(--c-ok))', // green
+  '#f472b6', // pink
+  '#facc15', // yellow
+  '#fb923c', // orange
+  '#c084fc', // purple
+  '#a3e635', // lime
+];
+
+const AGG_DUTY_COLOR = 'rgb(var(--c-ok))';
+
+type Row = MetricSample & { time: string };
 
 function fmtTime(t: number): string {
   const d = new Date(t);
@@ -42,7 +58,11 @@ function fmtTime(t: number): string {
 
 // Time-series of either temperatures (dual axis: °C + fan-duty %) or compute
 // load (single % axis shared with fan duty), backed by the client metric
-// history ring buffer. Useful for seeing how fans respond to heat / load.
+// history ring buffer. Fan duty is drawn as one dashed line per active profile
+// (the duty each profile's curve computes); with no active profiles — or an
+// older backend that doesn't report per-profile duty — a single aggregate
+// "Fan duty" line (max across fans) is shown instead. Useful for seeing how
+// each profile responds to heat / load.
 export default function TimeSeriesPanel({
   history,
   variant = 'temp',
@@ -50,14 +70,27 @@ export default function TimeSeriesPanel({
   history: MetricSample[];
   variant?: Variant;
 }) {
-  const data = useMemo(() => history.map((s) => ({ ...s, time: fmtTime(s.t) })), [history]);
+  const data = useMemo<Row[]>(() => history.map((s) => ({ ...s, time: fmtTime(s.t) })), [history]);
 
-  const allSeries = variant === 'load' ? LOAD_SERIES : TEMP_SERIES;
-  // Only plot series that actually have data.
-  const activeSeries = useMemo(
-    () => allSeries.filter((s) => history.some((h) => h[s.key] != null)),
-    [allSeries, history]
+  const baseAll = variant === 'load' ? LOAD_SERIES : TEMP_SERIES;
+  // Only plot base series that actually have data.
+  const activeBase = useMemo(
+    () => baseAll.filter((s) => history.some((h) => h[s.key] != null)),
+    [baseAll, history]
   );
+
+  // Distinct profile names seen anywhere in the buffer → one duty line each.
+  const profileNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of history) {
+      if (s.duties) for (const k of Object.keys(s.duties)) set.add(k);
+    }
+    return [...set];
+  }, [history]);
+
+  const dutyAxis: DutyAxis = variant === 'load' ? 'pct' : 'duty';
+  const hasProfiles = profileNames.length > 0;
+  const showAggDuty = !hasProfiles && history.some((h) => h.duty != null);
 
   if (history.length < 3) {
     return (
@@ -133,7 +166,9 @@ export default function TimeSeriesPanel({
             labelStyle={{ color: 'rgb(var(--c-muted))' }}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          {activeSeries.map((s) => (
+
+          {/* Temperature / load lines */}
+          {activeBase.map((s) => (
             <Line
               key={s.key}
               yAxisId={s.axis}
@@ -142,12 +177,43 @@ export default function TimeSeriesPanel({
               name={s.name}
               stroke={s.color}
               strokeWidth={2}
-              strokeDasharray={s.dashed ? '5 4' : undefined}
               dot={false}
               isAnimationActive={false}
               connectNulls
             />
           ))}
+
+          {/* Fan duty: one dashed line per active profile, else the aggregate. */}
+          {hasProfiles
+            ? profileNames.map((name, i) => (
+                <Line
+                  key={`p:${name}`}
+                  yAxisId={dutyAxis}
+                  type="monotone"
+                  dataKey={(row: Row) => row.duties?.[name] ?? null}
+                  name={name}
+                  stroke={PROFILE_COLORS[i % PROFILE_COLORS.length]}
+                  strokeWidth={2}
+                  strokeDasharray="5 4"
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls
+                />
+              ))
+            : showAggDuty && (
+                <Line
+                  yAxisId={dutyAxis}
+                  type="monotone"
+                  dataKey="duty"
+                  name="Fan duty"
+                  stroke={AGG_DUTY_COLOR}
+                  strokeWidth={2}
+                  strokeDasharray="5 4"
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls
+                />
+              )}
         </LineChart>
       </ResponsiveContainer>
     </div>

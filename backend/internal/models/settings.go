@@ -271,13 +271,24 @@ type DriveSensor struct {
 	Temperature float64 `json:"temperature"` // Celsius
 }
 
+// ProfileDuty is the fan duty an active profile computed for its zones on the
+// last control cycle — the value the profile's curve/algorithm produced for the
+// current inputs. Monitoring only; it does not change fan behaviour. Emitted
+// only while the controller is running.
+type ProfileDuty struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+	Duty int    `json:"duty"` // Percent (0-100)
+}
+
 // ControllerState represents the fan controller state
 type ControllerState struct {
-	Running          bool     `json:"running"`
-	ActiveProfiles   []string `json:"active_profiles,omitempty"`    // Names of all active profiles
-	ActiveProfileIDs []uint   `json:"active_profile_ids,omitempty"` // IDs of all active profiles
-	LastUpdate       string   `json:"last_update,omitempty"`
-	ManualMode       bool     `json:"manual_mode"`
+	Running          bool          `json:"running"`
+	ActiveProfiles   []string      `json:"active_profiles,omitempty"`    // Names of all active profiles
+	ActiveProfileIDs []uint        `json:"active_profile_ids,omitempty"` // IDs of all active profiles
+	ProfileDuties    []ProfileDuty `json:"profile_duties,omitempty"`     // per active profile: last computed duty %
+	LastUpdate       string        `json:"last_update,omitempty"`
+	ManualMode       bool          `json:"manual_mode"`
 	
 	// Motherboard information
 	MotherboardVendor string `json:"motherboard_vendor,omitempty"`
