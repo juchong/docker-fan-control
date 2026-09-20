@@ -90,14 +90,16 @@ state persists across cycles; they're pruned only from the control goroutine.
   `/sys`; the container has no `/dev` block nodes by design. `smartctl` runs only
   as a fallback when `/dev` does have them. Drives are ordered by device name,
   never hwmonN — profile inputs are `drive_temp<index>` by slice position.
-- **Thermal safety is per device** (`services/thermal.go`): each GPU/CPU/drive is judged by
-  headroom to its OWN limit (NVML `GPU_MAX` threshold, hwmon `crit`, coretemp `crit`, else a
-  class default; per-class overrides win) with `warning_margin`/`emergency_margin`. Any
-  critical device → all fans to `emergency_speed`, held with hysteresis (margin + 5 °C, ≥ 30 s).
-  `thermal_limits_mode=legacy` reproduces the old single `warning_temp`/`emergency_temp`
-  comparison bit-for-bit (tests assert it) and is what an UPGRADED database is seeded with;
-  new installs get `hardware`. Board temps never take part. The same `EvaluateThermal`
-  annotates the REST/WS payloads (`limit`, `headroom`, `status`, `controller.thermal`).
+- **Thermal warnings are per device; the emergency is not** (`services/thermal.go`). Each
+  GPU/CPU/drive is judged by headroom to its OWN limit (NVML `GPU_MAX` threshold, hwmon `crit`,
+  coretemp `crit`, else a class default; per-class overrides win) with `warning_margin` — this is
+  monitoring only and must never change fan behaviour. The emergency (all fans to
+  `emergency_speed`) stays the single rule it always was: any reading ≥ `emergency_temp`, released
+  as soon as it drops below — identical in both modes, and a device meeting it is "critical"
+  regardless of its limit (tests assert both). `thermal_limits_mode=legacy` reproduces the old
+  single `warning_temp` warning and is what an UPGRADED database is seeded with; new installs get
+  `hardware`. Events are written on status transitions (+ a 15-min reminder), never per cycle.
+  Board temps never take part. `EvaluateThermal` also annotates the REST/WS payloads.
 - **Inputs may mix units.** Temps are °C, load is %. Load is projected onto the
   profile's curve axis in `calculateInputValue` (`profileInputAxis`) so it can be
   aggregated with temps. Keep temperature-only profiles byte-identical (only load

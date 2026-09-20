@@ -48,10 +48,12 @@ export function DegradedBanner() {
         : `${label} is ${worst.headroom} °C from its limit (${worst.limit} °C)`;
     };
     if (thermal?.status === 'critical') {
+      const kind = worst ? ({ gpu: 'GPU', cpu: 'CPU', drive: 'Drive' }[worst.kind] ?? worst.kind) : 'A device';
+      const label = worst ? `${kind} ${worst.index}${worst.name ? ` (${worst.name})` : ''}` : kind;
       return {
         severity: 'danger',
         icon: OctagonAlert,
-        message: `Thermal emergency: ${describe()} — all fans at emergency speed.`,
+        message: `Thermal emergency: ${label} is at ${worst ? Math.round(worst.temperature) : '?'} °C, the emergency temperature is ${thermal.emergency_temp} °C — all fans at emergency speed.`,
       };
     }
     if (controller && controller.running === false) {

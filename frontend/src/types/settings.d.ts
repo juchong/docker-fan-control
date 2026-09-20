@@ -18,7 +18,6 @@ export interface AppSettings {
   /** Thermal limits (absent on older backends). */
   thermal_limits_mode?: 'hardware' | 'legacy';
   warning_margin?: number;
-  emergency_margin?: number;
   limit_gpu?: number;
   limit_cpu?: number;
   limit_drive?: number;
@@ -44,7 +43,6 @@ export interface UpdateSettingsRequest {
   safety_on_shutdown?: boolean;
   thermal_limits_mode?: 'hardware' | 'legacy';
   warning_margin?: number;
-  emergency_margin?: number;
   /** Per-class limit override in °C; 0 clears it. */
   limit_gpu?: number;
   limit_cpu?: number;

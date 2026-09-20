@@ -73,7 +73,8 @@ type FanController struct {
 	thermal         *models.ThermalState
 	emergencyActive bool
 	emergencySince  time.Time
-	lastDeviceWarn  map[string]time.Time // per-device event throttle
+	deviceStatus    map[string]string    // per-device last status (events on change)
+	deviceLastLog   map[string]time.Time // per-device last event time (periodic reminder)
 	limitsLogged    bool                 // effective limits logged once per config
 	lastGPUs        []models.GPUMetrics  // metrics gathered this cycle (control goroutine only)
 	lastSystem      *models.SystemMetrics
@@ -376,8 +377,8 @@ func (c *FanController) loadSettings() {
 	c.thermalCfg = thermalConfigFrom(settings)
 	c.limitsLogged = false
 	log.Info().Str("mode", c.thermalCfg.Mode).Int("warning_margin", c.thermalCfg.WarningMargin).
-		Int("emergency_margin", c.thermalCfg.EmergencyMargin).Float64("legacy_warning", c.thermalCfg.LegacyWarning).
-		Float64("legacy_emergency", c.thermalCfg.LegacyEmergency).Msg("Thermal limits configured")
+		Float64("legacy_warning", c.thermalCfg.LegacyWarning).Float64("emergency_temp", c.thermalCfg.EmergencyTemp).
+		Msg("Thermal limits configured")
 	if settings.StartupMode != "" {
 		c.startupMode = settings.StartupMode
 	}
@@ -489,31 +490,29 @@ func (c *FanController) controlCycle(ctx context.Context) {
 	}
 	c.pruneAlgoState(activeIDs)
 
-	// Thermal evaluation: every device against its own limit (or, in legacy
-	// mode, the hottest reading against the single thresholds). Any critical
-	// device forces all zones to emergency speed; in hardware mode the
-	// emergency is held until headroom is comfortably back (hysteresis).
+	// Thermal evaluation: per-device warnings against each device's own limit
+	// (monitoring only), plus the emergency rule, which is unchanged: any
+	// GPU/CPU/drive reading at or above emergency_temp forces all zones to the
+	// emergency speed for as long as it holds.
 	cfg := c.thermalCfgSnapshot()
 	ev := EvaluateThermal(cfg, c.lastGPUs, c.lastSystem)
 	c.logEffectiveLimits(ev)
-	if ev.State.Status == models.ThermalCritical || c.emergencyActive {
-		if c.emergencyActive && ShouldExitEmergency(cfg, ev, c.emergencySince, time.Now()) {
-			c.emergencyActive = false
-			held := time.Since(c.emergencySince).Round(time.Second)
-			log.Info().Dur("held", held).Msg("Thermal emergency cleared; profiles resume control")
-			c.logger.LogSystemEvent("Thermal emergency cleared", models.JSONMap{"held_for": held.String()})
-			// Fall through: normal control resumes this cycle.
-		} else {
-			if !c.emergencyActive {
-				c.emergencyActive = true
-				c.emergencySince = time.Now()
-			}
-			c.noTempCycles = 0
-			c.setAllFans(ctx, c.emergencySpeed)
-			c.logThermal(cfg, ev, models.ThermalCritical)
-			c.publishThermal(ev.State, true)
-			return
+	c.logThermalTransitions(cfg, ev)
+	if ev.State.Status == models.ThermalCritical {
+		if !c.emergencyActive {
+			c.emergencyActive = true
+			c.emergencySince = time.Now()
 		}
+		c.noTempCycles = 0
+		c.setAllFans(ctx, c.emergencySpeed)
+		c.publishThermal(ev.State, true)
+		return
+	}
+	if c.emergencyActive {
+		c.emergencyActive = false
+		held := time.Since(c.emergencySince).Round(time.Second)
+		log.Info().Dur("held", held).Msg("Thermal emergency cleared; profiles resume control")
+		c.logger.LogSystemEvent("Thermal emergency cleared", models.JSONMap{"held_for": held.String()})
 	}
 	c.publishThermal(ev.State, false)
 
@@ -533,9 +532,6 @@ func (c *FanController) controlCycle(ctx context.Context) {
 		c.noTempCycles = 0
 	}
 
-	// Per-device warnings (throttled per device so a hot device can't flood
-	// the event table every cycle).
-	c.logThermal(cfg, ev, models.ThermalWarning)
 
 	if len(profiles) == 0 {
 		return // No active profiles
@@ -927,7 +923,7 @@ func (c *FanController) thermalCfgSnapshot() ThermalConfig {
 	defer c.mu.RUnlock()
 	return ThermalConfig{
 		Mode: models.ThermalModeLegacy, LegacyWarning: c.warningTemp,
-		LegacyEmergency: c.emergencyTemp, WarningEnabled: c.warningEnabled,
+		EmergencyTemp: c.emergencyTemp, WarningEnabled: c.warningEnabled,
 	}
 }
 
@@ -959,45 +955,57 @@ func (c *FanController) logEffectiveLimits(ev ThermalEvaluation) {
 	}
 }
 
-// logThermal records one event per device at the given status, throttled per
-// device (critical every 30 s, warning every 60 s).
-func (c *FanController) logThermal(cfg ThermalConfig, ev ThermalEvaluation, status string) {
-	if c.lastDeviceWarn == nil {
-		c.lastDeviceWarn = make(map[string]time.Time)
-	}
-	throttle := 60 * time.Second
-	if status == models.ThermalCritical {
-		throttle = 30 * time.Second
-	}
-	for _, d := range ev.Devices {
-		if d.Status != status {
-			continue
-		}
-		key := DeviceKey(d) + ":" + status
-		if last, ok := c.lastDeviceWarn[key]; ok && time.Since(last) < throttle {
-			continue
-		}
-		c.lastDeviceWarn[key] = time.Now()
+// thermalReminder is how often a device that STAYS in warning/critical is
+// logged again; otherwise events are written only when its status changes.
+const thermalReminder = 15 * time.Minute
 
-		var msg string
+// logThermalTransitions writes one event per device when its status changes
+// (entering warning, entering critical, recovering) and a periodic reminder
+// while it stays there — a device that runs warm for hours produces a handful
+// of events, not one per cycle.
+func (c *FanController) logThermalTransitions(cfg ThermalConfig, ev ThermalEvaluation) {
+	if c.deviceStatus == nil {
+		c.deviceStatus = make(map[string]string)
+		c.deviceLastLog = make(map[string]time.Time)
+	}
+	now := time.Now()
+	for _, d := range ev.Devices {
+		key := DeviceKey(d)
+		prev, seen := c.deviceStatus[key]
+		changed := seen && prev != d.Status
+		if !seen {
+			// First sight: only report if already outside "ok".
+			changed = d.Status != models.ThermalOK
+		}
+		reminder := d.Status != models.ThermalOK && now.Sub(c.deviceLastLog[key]) >= thermalReminder
+		c.deviceStatus[key] = d.Status
+		if !changed && !reminder {
+			continue
+		}
+		c.deviceLastLog[key] = now
+
+		var where string
 		if cfg.Mode == models.ThermalModeLegacy {
-			th := cfg.LegacyWarning
-			if status == models.ThermalCritical {
-				th = cfg.LegacyEmergency
-			}
-			msg = fmt.Sprintf("%s %.0f°C exceeded the %s threshold (%.0f°C)", DeviceLabel(d), d.Temperature, status, th)
+			where = fmt.Sprintf("%s %.0f°C", DeviceLabel(d), d.Temperature)
 		} else {
-			msg = fmt.Sprintf("%s %.0f°C — %d°C from its limit (%d°C)", DeviceLabel(d), d.Temperature, d.Headroom, d.Limit)
+			where = fmt.Sprintf("%s %.0f°C — %d°C from its limit (%d°C)", DeviceLabel(d), d.Temperature, d.Headroom, d.Limit)
 		}
 		details := models.JSONMap{
 			"kind": d.Kind, "index": d.Index, "device": d.Name, "temp": d.Temperature,
-			"limit": d.Limit, "headroom": d.Headroom, "status": d.Status,
+			"limit": d.Limit, "headroom": d.Headroom, "status": d.Status, "previous": prev,
 		}
-		if status == models.ThermalCritical {
-			log.Warn().Str("device", DeviceLabel(d)).Float64("temp", d.Temperature).Int("limit", d.Limit).Msg("Thermal emergency")
-			c.logger.Error(models.CategoryTemp, "Thermal emergency: "+msg+" — all fans at emergency speed", details)
-		} else {
-			c.logger.Warn(models.CategoryTemp, msg, details)
+		switch d.Status {
+		case models.ThermalCritical:
+			log.Warn().Str("device", DeviceLabel(d)).Float64("temp", d.Temperature).Float64("emergency_temp", cfg.EmergencyTemp).Msg("Thermal emergency")
+			c.logger.Error(models.CategoryTemp, fmt.Sprintf("Thermal emergency: %s reached the emergency temperature (%.0f°C) — all fans at emergency speed", where, cfg.EmergencyTemp), details)
+		case models.ThermalWarning:
+			if cfg.Mode == models.ThermalModeLegacy {
+				c.logger.Warn(models.CategoryTemp, fmt.Sprintf("%s exceeded the warning threshold (%.0f°C)", where, cfg.LegacyWarning), details)
+			} else {
+				c.logger.Warn(models.CategoryTemp, "Running warm: "+where, details)
+			}
+		default:
+			c.logger.Info(models.CategoryTemp, "Recovered: "+where, details)
 		}
 	}
 }
@@ -1070,5 +1078,5 @@ func (c *FanController) UpdateSettings(settings *models.AppSettings) {
 	c.thermalCfg = thermalConfigFrom(settings)
 	c.limitsLogged = false
 	log.Info().Str("mode", c.thermalCfg.Mode).Int("warning_margin", c.thermalCfg.WarningMargin).
-		Int("emergency_margin", c.thermalCfg.EmergencyMargin).Msg("Thermal limits updated")
+		Float64("emergency_temp", c.thermalCfg.EmergencyTemp).Msg("Thermal limits updated")
 }

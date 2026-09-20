@@ -3,23 +3,27 @@ package services
 import (
 	"fmt"
 	"math"
-	"time"
 
 	"docker-fan-control/internal/models"
 )
 
-// Thermal evaluation: instead of comparing the single hottest reading against
-// one absolute threshold, every monitored device is judged against its OWN
-// limit — the point at which it throttles or is out of spec — and the margins
-// in ThermalConfig decide how much headroom counts as "warning" or "critical".
+// Thermal evaluation.
 //
-// Limits, in order of preference: an operator override for the device class,
-// the value the hardware publishes (NVML thresholds for GPUs, hwmon crit for
-// drives, coretemp crit for Intel CPUs), else a conservative class default.
-// Board/VRM/PCH temperatures never take part (their aux channels read bogus).
+// WARNINGS are judged per device: every GPU, CPU and drive is compared against
+// its OWN limit — the point at which it throttles or is out of spec — and
+// WarningMargin decides how much headroom counts as "warning". Limits, in
+// order of preference: an operator override for the device class, the value
+// the hardware publishes (NVML thresholds for GPUs, hwmon crit for drives,
+// coretemp crit for Intel CPUs), else a conservative class default. This is
+// monitoring only: it changes nothing about how fans are driven.
 //
-// ThermalModeLegacy reproduces the historical behaviour exactly: warning when
-// the hottest reading >= warning_temp, critical when >= emergency_temp.
+// The EMERGENCY (all fans to the emergency speed) is deliberately NOT part of
+// this: it remains the single rule it always was — any GPU/CPU/drive reading
+// at or above emergency_temp — in both modes, so the limits feature cannot
+// change fan behaviour. A device meeting that rule is reported "critical".
+//
+// ThermalModeLegacy reproduces the historical warning as well: the hottest
+// reading >= warning_temp.
 
 // Class defaults used when neither an override nor the hardware gives a limit.
 const (
@@ -28,42 +32,32 @@ const (
 	defaultLimitDrive = 70 // common SATA HDD/SSD operating maximum; NVMe publishes crit
 )
 
-// Emergency exit hysteresis (hardware mode): stay in emergency until every
-// device has this much headroom beyond the emergency margin, and for at least
-// emergencyMinHold, so the fans don't chatter around the threshold.
-const (
-	emergencyExitExtra = 5
-	emergencyMinHold   = 30 * time.Second
-)
-
 // ThermalConfig is the operator configuration for thermal evaluation.
 type ThermalConfig struct {
-	Mode            string
-	WarningMargin   int
-	EmergencyMargin int
-	LimitGPU        *int
-	LimitCPU        *int
-	LimitDrive      *int
+	Mode          string
+	WarningMargin int // °C of headroom at/below which a device is "warning" (hardware mode)
+	LimitGPU      *int
+	LimitCPU      *int
+	LimitDrive    *int
 
-	// Legacy single thresholds (also the fallback in hardware mode for a device
-	// class with no known limit).
+	// Legacy warning threshold (legacy mode only) and the emergency threshold
+	// (both modes — the fan-behaviour rule this feature does not touch).
 	LegacyWarning   float64
-	LegacyEmergency float64
+	EmergencyTemp   float64
 	WarningEnabled  bool
 }
 
 // thermalConfigFrom builds the config from stored settings.
 func thermalConfigFrom(s *models.AppSettings) ThermalConfig {
 	cfg := ThermalConfig{
-		Mode:            s.ThermalLimitsMode,
-		WarningMargin:   s.WarningMargin,
-		EmergencyMargin: s.EmergencyMargin,
-		LimitGPU:        s.LimitGPU,
-		LimitCPU:        s.LimitCPU,
-		LimitDrive:      s.LimitDrive,
-		LegacyWarning:   float64(s.WarningTemp),
-		LegacyEmergency: float64(s.EmergencyTemp),
-		WarningEnabled:  s.WarningEnabled,
+		Mode:           s.ThermalLimitsMode,
+		WarningMargin:  s.WarningMargin,
+		LimitGPU:       s.LimitGPU,
+		LimitCPU:       s.LimitCPU,
+		LimitDrive:     s.LimitDrive,
+		LegacyWarning:  float64(s.WarningTemp),
+		EmergencyTemp:  float64(s.EmergencyTemp),
+		WarningEnabled: s.WarningEnabled,
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = models.ThermalModeLegacy
@@ -85,8 +79,7 @@ func EvaluateThermal(cfg ThermalConfig, gpus []models.GPUMetrics, sys *models.Sy
 	for i := range gpus {
 		g := &gpus[i]
 		limit, src := resolveLimit(cfg, cfg.LimitGPU, g.Limit, g.LimitSource, defaultLimitGPU)
-		d := judge(cfg, "gpu", g.Index, g.Name, float64(g.Temperature), limit, src, &g.ThermalInfo)
-		devices = append(devices, d)
+		devices = append(devices, judge(cfg, "gpu", g.Index, g.Name, float64(g.Temperature), limit, src, &g.ThermalInfo))
 	}
 	if sys != nil {
 		for i := range sys.CPUPackages {
@@ -96,8 +89,7 @@ func EvaluateThermal(cfg ThermalConfig, gpus []models.GPUMetrics, sys *models.Sy
 				name = c.Name
 			}
 			limit, src := resolveLimit(cfg, cfg.LimitCPU, c.Limit, c.LimitSource, defaultLimitCPU)
-			d := judge(cfg, "cpu", c.Index, name, c.Temperature, limit, src, &c.ThermalInfo)
-			devices = append(devices, d)
+			devices = append(devices, judge(cfg, "cpu", c.Index, name, c.Temperature, limit, src, &c.ThermalInfo))
 		}
 		for i := range sys.Drives {
 			dr := &sys.Drives[i]
@@ -107,8 +99,7 @@ func EvaluateThermal(cfg ThermalConfig, gpus []models.GPUMetrics, sys *models.Sy
 				hw, hwSrc = dr.Crit, "hwmon"
 			}
 			limit, src := resolveLimit(cfg, cfg.LimitDrive, hw, hwSrc, defaultLimitDrive)
-			d := judge(cfg, "drive", dr.Index, dr.Model, float64(dr.Temperature), limit, src, &dr.ThermalInfo)
-			devices = append(devices, d)
+			devices = append(devices, judge(cfg, "drive", dr.Index, dr.Model, float64(dr.Temperature), limit, src, &dr.ThermalInfo))
 		}
 	}
 
@@ -116,10 +107,10 @@ func EvaluateThermal(cfg ThermalConfig, gpus []models.GPUMetrics, sys *models.Sy
 	sortDevices(cfg, devices)
 
 	state := models.ThermalState{
-		Mode:            cfg.Mode,
-		Status:          models.ThermalOK,
-		WarningMargin:   cfg.WarningMargin,
-		EmergencyMargin: cfg.EmergencyMargin,
+		Mode:          cfg.Mode,
+		Status:        models.ThermalOK,
+		WarningMargin: cfg.WarningMargin,
+		EmergencyTemp: int(math.Round(cfg.EmergencyTemp)),
 	}
 	if len(devices) > 0 {
 		w := devices[0]
@@ -130,10 +121,10 @@ func EvaluateThermal(cfg ThermalConfig, gpus []models.GPUMetrics, sys *models.Sy
 }
 
 // resolveLimit picks the limit for a device: override > hardware > default.
-// In legacy mode the "limit" is the emergency temperature itself.
+// In legacy mode the "limit" shown is the emergency temperature itself.
 func resolveLimit(cfg ThermalConfig, override, hardware *int, hardwareSrc string, classDefault int) (int, string) {
 	if cfg.Mode == models.ThermalModeLegacy {
-		return int(math.Round(cfg.LegacyEmergency)), "legacy"
+		return int(math.Round(cfg.EmergencyTemp)), "legacy"
 	}
 	if override != nil && *override > 0 {
 		return *override, "override"
@@ -147,20 +138,23 @@ func resolveLimit(cfg ThermalConfig, override, hardware *int, hardwareSrc string
 	return classDefault, "default"
 }
 
-// judge classifies one device and fills its ThermalInfo.
+// judge classifies one device and fills its ThermalInfo. "critical" is the
+// emergency rule (temp >= emergency_temp) in both modes; "warning" is
+// headroom-based in hardware mode and the legacy threshold in legacy mode.
 func judge(cfg ThermalConfig, kind string, index int, name string, temp float64, limit int, src string, info *models.ThermalInfo) models.ThermalDevice {
 	headroom := int(math.Round(float64(limit) - temp))
 	status := models.ThermalOK
-	if cfg.Mode == models.ThermalModeLegacy {
-		if temp >= cfg.LegacyEmergency {
-			status = models.ThermalCritical
-		} else if cfg.WarningEnabled && temp >= cfg.LegacyWarning {
+	switch {
+	case temp >= cfg.EmergencyTemp:
+		status = models.ThermalCritical
+	case !cfg.WarningEnabled:
+		// warnings disabled
+	case cfg.Mode == models.ThermalModeLegacy:
+		if temp >= cfg.LegacyWarning {
 			status = models.ThermalWarning
 		}
-	} else {
-		if headroom <= cfg.EmergencyMargin {
-			status = models.ThermalCritical
-		} else if cfg.WarningEnabled && headroom <= cfg.WarningMargin {
+	default:
+		if headroom <= cfg.WarningMargin {
 			status = models.ThermalWarning
 		}
 	}
@@ -177,8 +171,23 @@ func judge(cfg ThermalConfig, kind string, index int, name string, temp float64,
 	}
 }
 
+// statusRank orders statuses so a critical device always sorts first, whatever
+// its headroom: the emergency rule and the per-device limits are independent.
+func statusRank(s string) int {
+	switch s {
+	case models.ThermalCritical:
+		return 2
+	case models.ThermalWarning:
+		return 1
+	}
+	return 0
+}
+
 func sortDevices(cfg ThermalConfig, devices []models.ThermalDevice) {
 	less := func(a, b models.ThermalDevice) bool {
+		if ra, rb := statusRank(a.Status), statusRank(b.Status); ra != rb {
+			return ra > rb
+		}
 		if cfg.Mode == models.ThermalModeLegacy {
 			return a.Temperature > b.Temperature
 		}
@@ -190,24 +199,6 @@ func sortDevices(cfg ThermalConfig, devices []models.ThermalDevice) {
 			devices[j], devices[j-1] = devices[j-1], devices[j]
 		}
 	}
-}
-
-// ShouldExitEmergency reports whether an active emergency may end. Hardware
-// mode applies hysteresis (extra headroom + minimum hold); legacy mode ends it
-// as soon as no device is critical, exactly as before.
-func ShouldExitEmergency(cfg ThermalConfig, ev ThermalEvaluation, since time.Time, now time.Time) bool {
-	if cfg.Mode == models.ThermalModeLegacy {
-		return ev.State.Status != models.ThermalCritical
-	}
-	if now.Sub(since) < emergencyMinHold {
-		return false
-	}
-	for _, d := range ev.Devices {
-		if d.Headroom <= cfg.EmergencyMargin+emergencyExitExtra {
-			return false
-		}
-	}
-	return true
 }
 
 // DeviceLabel renders a device for log messages: "GPU 0 (NVIDIA RTX PRO 6000)".
@@ -222,5 +213,5 @@ func DeviceLabel(d models.ThermalDevice) string {
 	return fmt.Sprintf("%s %d", kind, d.Index)
 }
 
-// DeviceKey is the throttle key for per-device event logging.
+// DeviceKey identifies a device for per-device state tracking.
 func DeviceKey(d models.ThermalDevice) string { return fmt.Sprintf("%s:%d", d.Kind, d.Index) }

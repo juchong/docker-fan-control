@@ -66,8 +66,7 @@ func initDefaultSettings() error {
 		models.SettingWarningTemp:       70,
 		models.SettingWarningEnabled:    true,
 		models.SettingSafetyOnShutdown:  true,
-		models.SettingWarningMargin:     15,
-		models.SettingEmergencyMargin:   5,
+		models.SettingWarningMargin:     10,
 	}
 
 	// Thermal limits mode: hardware-derived per-device limits for new installs,
@@ -133,8 +132,7 @@ func GetAllSettings() (*models.AppSettings, error) {
 		WarningEnabled:    true,
 		SafetyOnShutdown:  true,
 		ThermalLimitsMode: models.ThermalModeHardware,
-		WarningMargin:     15,
-		EmergencyMargin:   5,
+		WarningMargin:     10,
 	}
 
 	// A per-class limit override is stored as a number; 0/absent means none.
@@ -155,10 +153,6 @@ func GetAllSettings() (*models.AppSettings, error) {
 		case models.SettingWarningMargin:
 			if v, ok := s.Value.Data.(float64); ok {
 				result.WarningMargin = int(v)
-			}
-		case models.SettingEmergencyMargin:
-			if v, ok := s.Value.Data.(float64); ok {
-				result.EmergencyMargin = int(v)
 			}
 		case models.SettingLimitGPU:
 			result.LimitGPU = limitOverride(s.Value.Data)

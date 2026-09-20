@@ -461,8 +461,7 @@ GET /api/settings
   "warning_temp": 70,
   "warning_enabled": true,
   "thermal_limits_mode": "hardware",
-  "warning_margin": 15,
-  "emergency_margin": 5,
+  "warning_margin": 10,
   "limit_gpu": null,
   "limit_cpu": null,
   "limit_drive": null,
@@ -470,15 +469,17 @@ GET /api/settings
 }
 ```
 
-Thermal limits: in `hardware` mode each GPU/CPU/drive is judged by headroom to
-its own limit (NVML threshold, hwmon crit, coretemp crit, or a class default;
+Thermal limits (warnings/display only — never fan behaviour): in `hardware`
+mode each GPU/CPU/drive is judged by headroom to its own limit (NVML
+threshold, hwmon crit, coretemp crit, or a class default;
 `limit_gpu`/`limit_cpu`/`limit_drive` override per class, `0` clears) —
-`warning` at `headroom <= warning_margin` (1–40), `critical` at
-`headroom <= emergency_margin` (0–20, must be below the warning margin). In
-`legacy` mode the single `warning_temp`/`emergency_temp` comparison applies;
-upgraded installs are seeded `legacy`. The monitoring payload carries the
-result per device (`limit`, `limit_source`, `headroom`, `status`) and in
-`controller.thermal` (`mode`, `status`, `emergency_active`, `worst`).
+`warning` at `headroom <= warning_margin` (1–40). In `legacy` mode the single
+`warning_temp` comparison applies; upgraded installs are seeded `legacy`.
+`critical` is the emergency rule in both modes: a reading at or above
+`emergency_temp`, which is what drives all fans to `emergency_speed`. The
+monitoring payload carries the result per device (`limit`, `limit_source`,
+`headroom`, `status`) and in `controller.thermal` (`mode`, `status`,
+`emergency_active`, `emergency_temp`, `warning_margin`, `worst`).
 
 ### Update Settings
 
@@ -492,8 +493,7 @@ PUT /api/settings
   "emergency_temp": 90,
   "warning_temp": 75,
   "thermal_limits_mode": "hardware",
-  "warning_margin": 15,
-  "emergency_margin": 5,
+  "warning_margin": 10,
   "control_interval": 10,
   "zone_layout": {
     "zones": [

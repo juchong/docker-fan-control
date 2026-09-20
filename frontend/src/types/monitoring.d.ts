@@ -29,7 +29,8 @@ export interface ThermalState {
   status: ThermalStatus;
   emergency_active: boolean;
   warning_margin: number;
-  emergency_margin: number;
+  /** The all-fans emergency temperature (the unchanged fan-behaviour rule). */
+  emergency_temp: number;
   worst?: ThermalDevice;
 }
 

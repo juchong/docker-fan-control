@@ -117,33 +117,14 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Thermal limits: validate the values as they will be AFTER this update
-	// (a partial PUT may change only one of the two margins).
-	current, _ := database.GetAllSettings()
+	// Thermal limits (warnings / display only; the emergency rule above is
+	// what drives the fans and is validated separately).
 	if req.ThermalLimitsMode != nil && *req.ThermalLimitsMode != models.ThermalModeHardware && *req.ThermalLimitsMode != models.ThermalModeLegacy {
 		http.Error(w, "Thermal limits mode must be 'hardware' or 'legacy'", http.StatusBadRequest)
 		return
 	}
-	warnMargin, emergMargin := 15, 5
-	if current != nil {
-		warnMargin, emergMargin = current.WarningMargin, current.EmergencyMargin
-	}
-	if req.WarningMargin != nil {
-		if *req.WarningMargin < 1 || *req.WarningMargin > 40 {
-			http.Error(w, "Warning margin must be between 1 and 40°C of headroom", http.StatusBadRequest)
-			return
-		}
-		warnMargin = *req.WarningMargin
-	}
-	if req.EmergencyMargin != nil {
-		if *req.EmergencyMargin < 0 || *req.EmergencyMargin > 20 {
-			http.Error(w, "Emergency margin must be between 0 and 20°C of headroom", http.StatusBadRequest)
-			return
-		}
-		emergMargin = *req.EmergencyMargin
-	}
-	if emergMargin >= warnMargin {
-		http.Error(w, "Emergency margin must be smaller than the warning margin", http.StatusBadRequest)
+	if req.WarningMargin != nil && (*req.WarningMargin < 1 || *req.WarningMargin > 40) {
+		http.Error(w, "Warning margin must be between 1 and 40°C of headroom", http.StatusBadRequest)
 		return
 	}
 	for _, lim := range []struct {
@@ -230,9 +211,6 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.WarningMargin != nil {
 		database.SetSetting(models.SettingWarningMargin, *req.WarningMargin)
-	}
-	if req.EmergencyMargin != nil {
-		database.SetSetting(models.SettingEmergencyMargin, *req.EmergencyMargin)
 	}
 	if req.LimitGPU != nil {
 		database.SetSetting(models.SettingLimitGPU, *req.LimitGPU)

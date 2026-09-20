@@ -62,7 +62,6 @@ const (
 	// the margins below to its headroom.
 	SettingThermalLimitsMode = "thermal_limits_mode" // "hardware" or "legacy"
 	SettingWarningMargin     = "warning_margin"      // °C of headroom at/below which a device is "warning"
-	SettingEmergencyMargin   = "emergency_margin"    // °C of headroom at/below which a device is "critical"
 	SettingLimitGPU          = "limit_gpu"           // optional absolute per-class limit overrides (°C)
 	SettingLimitCPU          = "limit_cpu"
 	SettingLimitDrive        = "limit_drive"
@@ -115,9 +114,9 @@ type AppSettings struct {
 	SafetyOnShutdown  bool   `json:"safety_on_shutdown"` // Set fans to 100% when stopping
 
 	// Thermal limits (see SettingThermalLimitsMode). Overrides are nil when unset.
+	// These only affect warnings and what the UI shows — never fan behaviour.
 	ThermalLimitsMode string `json:"thermal_limits_mode"`
 	WarningMargin     int    `json:"warning_margin"`
-	EmergencyMargin   int    `json:"emergency_margin"`
 	LimitGPU          *int   `json:"limit_gpu,omitempty"`
 	LimitCPU          *int   `json:"limit_cpu,omitempty"`
 	LimitDrive        *int   `json:"limit_drive,omitempty"`
@@ -148,7 +147,6 @@ type UpdateSettingsRequest struct {
 	// Thermal limits. A per-class override of 0 clears it (back to hardware/default).
 	ThermalLimitsMode *string `json:"thermal_limits_mode,omitempty"`
 	WarningMargin     *int    `json:"warning_margin,omitempty"`
-	EmergencyMargin   *int    `json:"emergency_margin,omitempty"`
 	LimitGPU          *int    `json:"limit_gpu,omitempty"`
 	LimitCPU          *int    `json:"limit_cpu,omitempty"`
 	LimitDrive        *int    `json:"limit_drive,omitempty"`
@@ -207,7 +205,7 @@ type ThermalState struct {
 	Status          string         `json:"status"` // worst device status
 	EmergencyActive bool           `json:"emergency_active"`
 	WarningMargin   int            `json:"warning_margin"`
-	EmergencyMargin int            `json:"emergency_margin"`
+	EmergencyTemp   int            `json:"emergency_temp"` // the (unchanged) all-fans emergency rule
 	Worst           *ThermalDevice `json:"worst,omitempty"`
 }
 
